@@ -196,7 +196,6 @@ int main(void)
 	can be done here if it was not done before main() was called. */
 	prvSetupHardware();
 
-
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
 	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
@@ -223,7 +222,6 @@ int main(void)
 static void Manager_Task( void *pvParameters )
 {
 	uint16_t tx_data = amber;
-
 
 	while(1)
 	{
@@ -269,10 +267,10 @@ static void Blue_LED_Controller_Task( void *pvParameters )
 			else
 			{
 				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
-						vTaskDelay(500);
-					}
+				{
+					printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
+					vTaskDelay(500);
+				}
 			}
 		}
 	}
