@@ -152,13 +152,13 @@ functionality.
 #include "../FreeRTOS_Source/include/timers.h"
 
 /*-----------------------------------------------------------*/
-//traffic light states 
+//traffic light states
 #define yellow 1
 #define green 0
 #define red 2
 
-//sample rate of pot - lab manual 
-#define sample_rate_pot 100 
+//sample rate of pot - lab manual
+#define sample_rate_pot 100
 
 //////////////////////////////////////////////////////////
 //pin names
@@ -168,8 +168,8 @@ functionality.
 #define red_light GPIO_Pin_0 //lab manual pin 0
 #define yellow_light GPIO_Pin_1 //lab manual pin 1
 #define green_light GPIO_Pin_2 //lab manual pin 2
-	//shift register pins 
-#define shift_reg_data GPIO_Pin_6 
+	//shift register pins
+#define shift_reg_data GPIO_Pin_6
 	//shift reg clock pin
 #define shift_reg_clock GPIO_Pin_7
 	//shift reg reset pin
@@ -186,18 +186,18 @@ functionality.
 
 
 //////////////////////////////////////////////////////////
-//ques 
+//ques
 static xQueueHandle poll_adc_que; //que for polling adc values from pot
 static xQueueHandle generator_que; //generate cars based on pot
 static xQueueHandle light_state;//current light state
 //////////////////////////////////////////////////////////
 
-//Handles for sl timer 
-//street light timers - when timer goes off rtos will run this handle and this will wake the traffic light control to switch states 
-//Timer handle lets us stop start, change the wait of the timer 
+//Handles for sl timer
+//street light timers - when timer goes off rtos will run this handle and this will wake the traffic light control to switch states
+//Timer handle lets us stop start, change the wait of the timer
 static TimerHandle traffic_light_timer;//
 
-//task handles lets us wake up a specific task, stop and start the task if higher priority comes in 
+//task handles lets us wake up a specific task, stop and start the task if higher priority comes in
 static TaskHandle tl_task_handle;
 
 
@@ -259,157 +259,11 @@ int main(void)
 	xTaskCreate(generate_car_task, "generate car", configMINIMAL_STACK_SIZE +128,NULL,3,NULL);
 	xTaskCreate(display_street, "display street", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
 
-	//turn on scheduler 
+	//turn on scheduler
 	vTaskStartScheduler();
 
 	return 0;
 }
-
-/*-----------------------------------------------------------*/
-
-static void Manager_Task( void *pvParameters )
-{
-	uint16_t tx_data = amber;
-
-
-	while(1)
-	{
-
-		if(tx_data == amber)
-			STM_EVAL_LEDOn(amber_led);
-		if(tx_data == green)
-			STM_EVAL_LEDOn(green_led);
-		if(tx_data == red)
-			STM_EVAL_LEDOn(red_led);
-		if(tx_data == blue)
-			STM_EVAL_LEDOn(blue_led);
-
-		if( xQueueSend(xQueue_handle,&tx_data,1000))
-		{
-			printf("Manager: %u ON!\n", tx_data);
-			if(++tx_data == 4)
-				tx_data = 0;
-			vTaskDelay(1000);
-		}
-		else
-		{
-			printf("Manager Failed!\n");
-		}
-	}
-}
-
-/*-----------------------------------------------------------*/
-
-static void Blue_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == blue)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(blue_led);
-				printf("Blue Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-
-/*-----------------------------------------------------------*/
-
-static void Green_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == green)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(green_led);
-				printf("Green Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("GreenTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-/*-----------------------------------------------------------*/
-
-static void Red_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == red)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(red_led);
-				printf("Red off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("RedTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-
-/*-----------------------------------------------------------*/
-
-static void Amber_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == amber)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(amber_led);
-				printf("Amber Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("AmberTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-
-/*-----------------------------------------------------------*/
 
 void vApplicationMallocFailedHook( void )
 {
@@ -468,18 +322,18 @@ static void prvSetupHardware( void )
 	NVIC_SetPriorityGrouping( 0 );
 
 	// TODO: Setup the clocks, etc. here
-	
-	//Enable Clock 
+
+	//Enable Clock
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
-	//Enable pins 
+	//Enable pins
 	GPIO_InitTypeDef GPIO_config;
 	//output pins
-	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light | shift_reg_move | shift_reg_update;
+	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light | shift_reg_clock | shift_reg_reset;
 	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; //output
 	GPIO_config.GPIO_OType = GPIO_OType_PP;//push pull
 	GPIO_config.GPIO_PuPd = GPIO_PuPd_UP;//pull up
 	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;//speed good enough for shift reg
-	GPIO_Init(GPIOC, &GPIO_InitStruct);
+	GPIO_Init(GPIOC, &GPIO_config);
 
 	//Enable ADC
 	// ADC1 is on APB2 - enables adc clock
@@ -492,7 +346,7 @@ static void prvSetupHardware( void )
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL; // No pull resistor otherwise would effect voltage from pot
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	ADC_Init(ADC1, &ADC_InitStruct);
+	ADC_Init(ADC1, &GPIO_InitStruct);
 	ADC_Cmd(ADC1, ENABLE); // Power on ADC1
 	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
 	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
@@ -507,7 +361,7 @@ static uint16_t poll_adc_function(void){
 	uint16_t converted_data;
 	// 1. Trigger the conversion
 	ADC_SoftwareStartConv(ADC1);
-	// 2. Wait for End-of-Conversion fla
+	// 2. Wait for End-of-Conversion flag
 	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
 	// 3. Read the result (0-4095)
 	converted_data = ADC_GetConversionValue(ADC1);
@@ -516,10 +370,10 @@ static uint16_t poll_adc_function(void){
 
 
 //***
-static void delay_us(uint32_t time){
-	uint32_t start = TIM2->CNT;
-
-}
+//static void delay_us(uint32_t time){
+//	uint32_t start = TIM2->CNT;
+//
+//}
 
 //**
 //shift reg functions
@@ -529,7 +383,6 @@ static void sr_falling_edge(void){
 	//wait 2 ms enough time for clock to be high
 
 	GPIO_ResetBit(GPIOC, shift_reg_clock);
-
 	//wait 2 ms enough time for clock to be high
 
 }
@@ -561,8 +414,8 @@ static void update_traffic_rate_task(void *pvParameters){
 	xQueueOverwrite(generator_que, &adc_value);
 
 	next_poll_time = next_pole;
-	//vTaskDelay used to delay periodic tast 
-	//pdMS_TO_TICKS converts micro sec to ticks 
+	//vTaskDelay used to delay periodic tast
+	//pdMS_TO_TICKS converts micro sec to ticks
 	vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
 }
 
@@ -573,7 +426,7 @@ static void generate_car_task(void *pvParameters){
 	uint16_t adc_value;
 	#define min_delay = 500
 	#define max delay = 3500
-	
+
 	xQueuePeek(generator_que, &adc_value, portMax_DELAY);
 	while(1){
 		//read first value in the que
@@ -586,7 +439,6 @@ static void generate_car_task(void *pvParameters){
 /////////Taffic ligh control task///////////////////////////////////////
 
 
-	
 
 
 
