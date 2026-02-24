@@ -237,8 +237,7 @@ void static shift_reg_delay();
 static void delay_us(uint32_t time);
 
 
-
-
+static uint32_t light_time(uint16_t adc_value, uint8_t light);
 
 /*-----------------------------------------------------------*/
 
@@ -361,7 +360,7 @@ static uint16_t poll_adc_function(void){
 	uint16_t converted_data;
 	// 1. Trigger the conversion
 	ADC_SoftwareStartConv(ADC1);
-	// 2. Wait for End-of-Conversion flag
+	// 2. Wait for the End-of-Conversion flag
 	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
 	// 3. Read the result (0-4095)
 	converted_data = ADC_GetConversionValue(ADC1);
@@ -389,7 +388,7 @@ static void sr_falling_edge(void){
 
 
 
-//traffic light changer
+//traffic light changer helper fun
 static void tl_change_state(uint32_t light){
 	//reset all lights
 	GPIO_ResetBit(GPIOC, red | green | yellow);
@@ -404,19 +403,23 @@ static void tl_change_state(uint32_t light){
 }
 
 
+
+
 /////////Tasks///////////////////////////////////////
 static void update_traffic_rate_task(void *pvParameters){
 	//TickType_t used to measure time
  	TickType_t current_poll_time = xTaskGetTickCount();
 	//poll adc value from pot
-	uint16_t adc_value = poll_adc_function();
-	//give that to the generator que
-	xQueueOverwrite(generator_que, &adc_value);
+	for(;;){
+		uint16_t adc_value = poll_adc_function();
+		//give that to the que for other tasks to use 
+		xQueueOverwrite(poll_adc_que, &adc_value);
+		
+		//vTaskDelay used to delay periodic tast
+			//pdMS_TO_TICKS converts micro sec to ticks
+		vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
 
-	next_poll_time = next_pole;
-	//vTaskDelay used to delay periodic tast
-	//pdMS_TO_TICKS converts micro sec to ticks
-	vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
+	}
 }
 
 
@@ -425,18 +428,70 @@ static void update_traffic_rate_task(void *pvParameters){
 static void generate_car_task(void *pvParameters){
 	uint16_t adc_value;
 	#define min_delay = 500
-	#define max delay = 3500
-
-	xQueuePeek(generator_que, &adc_value, portMax_DELAY);
-	while(1){
-		//read first value in the que
+	#define max_delay = 3500//max is technically 4000 if the rand is completely added 
+	#define rand_max = 501
+	
+	for(;;){
+		//get the first item in the queue for adc value 
 		xQueuePeek(generator_que, &adc_value, portMax_DELAY);
-
+		//normalize ADC value
+			//need float for normalization
+		float normalize_adc = (float)adc_value / (float)4095;
+		//Makes sure we always get the minimum delay if the normalized adc was close to zero which would be way to fast of a rate
+		//originally had no max_delay*adc norm, and that did not work
+		float none_delay = max_delay - normalize_adc*(max delay - min_delay);
+		//delay time is none_delay + rand
+		//note tecnically the max is 4000
+		uint32_t delay_time_gen = (uint32_t)none_delay (uint32_t)(rand() % rand_max);
+		//give this delay to the periodic task
+		vTaskDelay(pdMS_TO_TICKS(delay_time_gen));
+		//send to generator que to gen car 
+		uint8_t gen_car_flag = 1;
+		xQueueSend(generator_que, &gen_car_flag, 0);
 	}
 }
 
 
 /////////Taffic ligh control task///////////////////////////////////////
+	//Traffic light timer handle/callback - wakes up the traffic light task when timer goes off 
+static TimerHandle traffic_light_timer(TimerHandle tim){
+	//When the timer goes off, we are going to trigger a traffic control event
+	//we want this code to be short because it has low priority and the light has high priority
+	//signals an event. the event is changing traffic light state
+	vTaskNotifyGive(tl_task_handle);
+}
+
+	//light_time - get time for light 
+
+static uint32_t light_time(uint16_t adc_value, uint8_t light){
+	//2 cases is light green 1 if it is red 0
+	//yellow light is const
+	uint32_t time;
+	#define default_light_time = 2000
+	if(light){
+		//light is green
+		time = default_light_time +  default_light_time*(uint32_t(adc_value) / 4095)
+	}else{
+		//light is red 
+		time = 2*default_light_time +  default_light_time*(uint32_t(adc_value) / 4095)
+	}
+	return time;
+}
+
+	//Traffic light task
+static void traffic_light_control_task(void *pvParameters){
+	//default to red light
+	xQueueOverwrite(light_state,@red_light);
+	//build periodic timer  xLightTimer - anme, time, one shot, 
+		//vLightTimerCallback
+	traffic_light_timer = xTimerCreate("tl_timer",pdMS_TO_TICKS(2000),pdFALSE,NULL,  tl_task_handle);
+	configASSERT(traffic_light_timer);
+}
+
+
+/////////Display street control///////////////////////////////////////
+
+
 
 
 
