@@ -21,21 +21,21 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   ALLOC
   8 .ARM.attributes 0000002e  00000000  00000000  0002008c  2**0
                   CONTENTS, READONLY
-  9 .debug_info   0000e261  00000000  00000000  000200ba  2**0
+  9 .debug_info   0000e212  00000000  00000000  000200ba  2**0
                   CONTENTS, READONLY, DEBUGGING
- 10 .debug_abbrev 000024f9  00000000  00000000  0002e31b  2**0
+ 10 .debug_abbrev 000024f9  00000000  00000000  0002e2cc  2**0
                   CONTENTS, READONLY, DEBUGGING
- 11 .debug_aranges 00000c50  00000000  00000000  00030818  2**3
+ 11 .debug_aranges 00000c50  00000000  00000000  000307c8  2**3
                   CONTENTS, READONLY, DEBUGGING
- 12 .debug_ranges 00000b18  00000000  00000000  00031468  2**3
+ 12 .debug_ranges 00000b18  00000000  00000000  00031418  2**3
                   CONTENTS, READONLY, DEBUGGING
- 13 .debug_line   00005801  00000000  00000000  00031f80  2**0
+ 13 .debug_line   00005801  00000000  00000000  00031f30  2**0
                   CONTENTS, READONLY, DEBUGGING
- 14 .debug_str    000043f9  00000000  00000000  00037781  2**0
+ 14 .debug_str    000043ac  00000000  00000000  00037731  2**0
                   CONTENTS, READONLY, DEBUGGING
- 15 .comment      0000007c  00000000  00000000  0003bb7a  2**0
+ 15 .comment      0000007c  00000000  00000000  0003badd  2**0
                   CONTENTS, READONLY
- 16 .debug_frame  00003784  00000000  00000000  0003bbf8  2**2
+ 16 .debug_frame  00003784  00000000  00000000  0003bb5c  2**2
                   CONTENTS, READONLY, DEBUGGING
 
 Disassembly of section .text:
@@ -8096,7 +8096,6 @@ int main(void)
 	prvSetupHardware();
  8002c76:	f000 f9a4 	bl	8002fc2 <prvSetupHardware>
 
-
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
 	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
@@ -8206,7 +8205,6 @@ static void Manager_Task( void *pvParameters )
 	uint16_t tx_data = amber;
  8002d40:	2300      	movs	r3, #0
  8002d42:	81fb      	strh	r3, [r7, #14]
-
 
 	while(1)
 	{
@@ -8337,13 +8335,13 @@ static void Blue_LED_Controller_Task( void *pvParameters )
  8002e14:	4603      	mov	r3, r0
  8002e16:	2b00      	cmp	r3, #0
  8002e18:	d0da      	beq.n	8002dd0 <Blue_LED_Controller_Task+0x8>
-					{
-						printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
+				{
+					printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
  8002e1a:	89fb      	ldrh	r3, [r7, #14]
  8002e1c:	4619      	mov	r1, r3
  8002e1e:	4806      	ldr	r0, [pc, #24]	; (8002e38 <Blue_LED_Controller_Task+0x70>)
  8002e20:	f000 fc06 	bl	8003630 <printf>
-						vTaskDelay(500);
+					vTaskDelay(500);
  8002e24:	f44f 70fa 	mov.w	r0, #500	; 0x1f4
  8002e28:	f7fe fb08 	bl	800143c <vTaskDelay>
 		if(xQueueReceive(xQueue_handle, &rx_data, 500))

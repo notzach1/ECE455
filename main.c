@@ -198,7 +198,7 @@ static xQueueHandle light_state;//current light state
 static TimerHandle traffic_light_timer;//
 
 //task handles lets us wake up a specific task, stop and start the task if higher priority comes in 
-static TaskHandle tl_task_handle
+static TaskHandle tl_task_handle;
 
 
 //////////////////////////////////////////////////////////
@@ -218,10 +218,10 @@ static void tl_change_state(uint32_t light);
 
 //////////////////////////////////////////////////////////
 //tasks
-static void update_traffic_rate_task(void #pvParameters); //polls pot and updates the rate of gen
-static void traffic_light_control_task(void #pvParameters);//changes light states
-static void generate_car_task(void #pvParameters);//produces car generation
-static void display_street(void #pvParameters);//updates the street leds 
+static void update_traffic_rate_task(void *pvParameters); //polls pot and updates the rate of gen
+static void traffic_light_control_task(void *pvParameters);//changes light states
+static void generate_car_task(void *pvParameters);//produces car generation
+static void display_street(void *pvParameters);//updates the street leds
 
 
 /////////////////////////////////////////////////////////////////////
@@ -248,9 +248,9 @@ int main(void)
 	prvSetupHardware();
 
 	//build tasks xQueueCreat(length, size)
-	poll_adc_que = xQueueCreate(1, sizeof(unint16_t); //adc resolution is 12
-	generator_que = xQueueCreate(mainQUEUE_LENGTH, sizeof(unint8_t); //generate cars based on pot
-	light_state = xQueueCreate(1, sizeof(unint8_t);//current light state
+	poll_adc_que = xQueueCreate(1, sizeof(unint16_t)); //adc resolution is 12
+	generator_que = xQueueCreate(mainQUEUE_LENGTH, sizeof(unint8_t)); //generate cars based on pot
+	light_state = xQueueCreate(1, sizeof(unint8_t));//current light state
 
 	//build tasks xTaskCreate(function, name for debuging, size
 
@@ -552,7 +552,7 @@ static void tl_change_state(uint32_t light){
 
 
 /////////Tasks///////////////////////////////////////
-static void update_traffic_rate_task(void #pvParameters){
+static void update_traffic_rate_task(void *pvParameters){
 	//TickType_t used to measure time
  	TickType_t current_poll_time = xTaskGetTickCount();
 	//poll adc value from pot
@@ -560,17 +560,16 @@ static void update_traffic_rate_task(void #pvParameters){
 	//give that to the generator que
 	xQueueOverwrite(generator_que, &adc_value);
 
-	next_poll_time = next_pole
+	next_poll_time = next_pole;
 	//vTaskDelay used to delay periodic tast 
 	//pdMS_TO_TICKS converts micro sec to ticks 
-	vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot ));
-
+	vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
 }
 
 
 /////////Car Gen///////////////////////////////////////
 //need to generate randomly ~ to the adc value converted from pot
-static void generate_car_task(void #pvParameters){
+static void generate_car_task(void *pvParameters){
 	uint16_t adc_value;
 	#define min_delay = 500
 	#define max delay = 3500
@@ -581,9 +580,6 @@ static void generate_car_task(void #pvParameters){
 		xQueuePeek(generator_que, &adc_value, portMax_DELAY);
 
 	}
-
-
-
 }
 
 
