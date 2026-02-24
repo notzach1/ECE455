@@ -138,6 +138,11 @@ functionality.
 #include <stdint.h>
 #include <stdio.h>
 #include "stm32f4_discovery.h"
+#include <stdlib.h>
+
+//added
+#include "stm32f4xx_tim.h"
+
 /* Kernel includes. */
 #include "stm32f4xx.h"
 #include "../FreeRTOS_Source/include/FreeRTOS.h"
@@ -146,77 +151,119 @@ functionality.
 #include "../FreeRTOS_Source/include/task.h"
 #include "../FreeRTOS_Source/include/timers.h"
 
-
-
 /*-----------------------------------------------------------*/
+//traffic light states 
+#define yellow 1
+#define green 0
+#define red 2
+
+//sample rate of pot - lab manual 
+#define sample_rate_pot 100 
+
+//////////////////////////////////////////////////////////
+//pin names
+	//pin names for adc
+#define adc_pin GPIO_Pin_3//lab manual pin 3
+	//pin names for tl
+#define red_light GPIO_Pin_0 //lab manual pin 0
+#define yellow_light GPIO_Pin_1 //lab manual pin 1
+#define green_light GPIO_Pin_2 //lab manual pin 2
+	//shift register pins 
+#define shift_reg_data GPIO_Pin_6 
+	//shift reg clock pin
+#define shift_reg_clock GPIO_Pin_7
+	//shift reg reset pin
+#define shift_reg_reset  GPIO_Pin_8
+//////////////////////////////////////////////////////////
+
+
+//**********************************
+//might have to change?
 #define mainQUEUE_LENGTH 100
 
-#define amber  	0
-#define green  	1
-#define red  	2
-#define blue  	3
-
-#define amber_led	LED3
-#define green_led	LED4
-#define red_led		LED5
-#define blue_led	LED6
+//default yellow time (const)
+#define yellow_time = 2500
 
 
-/*
- * TODO: Implement this function for any hardware specific clock configuration
- * that was not already performed before main() was called.
- */
-static void prvSetupHardware( void );
+//////////////////////////////////////////////////////////
+//ques 
+static xQueueHandle poll_adc_que; //que for polling adc values from pot
+static xQueueHandle generator_que; //generate cars based on pot
+static xQueueHandle light_state;//current light state
+//////////////////////////////////////////////////////////
 
-/*
- * The queue send and receive tasks as described in the comments at the top of
- * this file.
- */
-static void Manager_Task( void *pvParameters );
-static void Blue_LED_Controller_Task( void *pvParameters );
-static void Green_LED_Controller_Task( void *pvParameters );
-static void Red_LED_Controller_Task( void *pvParameters );
-static void Amber_LED_Controller_Task( void *pvParameters );
+//Handles for sl timer 
+//street light timers - when timer goes off rtos will run this handle and this will wake the traffic light control to switch states 
+//Timer handle lets us stop start, change the wait of the timer 
+static TimerHandle traffic_light_timer;//
 
-xQueueHandle xQueue_handle = 0;
+//task handles lets us wake up a specific task, stop and start the task if higher priority comes in 
+static TaskHandle tl_task_handle
+
+
+//////////////////////////////////////////////////////////
+//hardware functions
+	/*
+	 * TODO: Implement this function for any hardware specific clock configuration
+	 * that was not already performed before main() was called.
+	 */
+static void prvSetupHardware( void );//sets up clocks and gpio pins
+	//adc poll helper fucntion
+static uint16_t poll_adc_function(void);//polls the adc reading from pot to get new rate of gen
+	//display street sends output to daisy chain to update screen(cars moving)
+static void sr_delay_timer(uint32_t street);
+
+	//changes the output of the tl leds
+static void tl_change_state(uint32_t light);
+
+//////////////////////////////////////////////////////////
+//tasks
+static void update_traffic_rate_task(void #pvParameters); //polls pot and updates the rate of gen
+static void traffic_light_control_task(void #pvParameters);//changes light states
+static void generate_car_task(void #pvParameters);//produces car generation
+static void display_street(void #pvParameters);//updates the street leds 
+
+
+/////////////////////////////////////////////////////////////////////
+//random number generator - need to generate number to compare to the rate provided by the adc
+
+
+
+
+/////////////////////////////////////////////////////////////////////
+//need shift register delay function 1us will use timer for accuracy
+void static shift_reg_delay();
+
+static void delay_us(uint32_t time);
+
+
+
 
 
 /*-----------------------------------------------------------*/
 
 int main(void)
 {
-
-	/* Initialize LEDs */
-	STM_EVAL_LEDInit(amber_led);
-	STM_EVAL_LEDInit(green_led);
-	STM_EVAL_LEDInit(red_led);
-	STM_EVAL_LEDInit(blue_led);
-
-	/* Configure the system ready to run the demo.  The clock configuration
-	can be done here if it was not done before main() was called. */
+	//run set up hardwar function
 	prvSetupHardware();
 
+	//build tasks xQueueCreat(length, size)
+	poll_adc_que = xQueueCreate(1, sizeof(unint16_t); //adc resolution is 12
+	generator_que = xQueueCreate(mainQUEUE_LENGTH, sizeof(unint8_t); //generate cars based on pot
+	light_state = xQueueCreate(1, sizeof(unint8_t);//current light state
 
-	/* Create the queue used by the queue send and queue receive tasks.
-	http://www.freertos.org/a00116.html */
-	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( uint16_t ) );	/* The size of each item the queue holds. */
+	//build tasks xTaskCreate(function, name for debuging, size
 
-	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "MainQueue" );
+	xTaskCreate(update_traffic_rate_task, "rate", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
+	xTaskCreate(traffic_light_control_task, "light control", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
+	xTaskCreate(generate_car_task, "generate car", configMINIMAL_STACK_SIZE +128,NULL,3,NULL);
+	xTaskCreate(display_street, "display street", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
 
-	xTaskCreate( Manager_Task, "Manager", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-	xTaskCreate( Blue_LED_Controller_Task, "Blue_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Red_LED_Controller_Task, "Red_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Green_LED_Controller_Task, "Green_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Amber_LED_Controller_Task, "Amber_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
-	/* Start the tasks and timer running. */
+	//turn on scheduler 
 	vTaskStartScheduler();
 
 	return 0;
 }
-
 
 /*-----------------------------------------------------------*/
 
@@ -420,7 +467,133 @@ static void prvSetupHardware( void )
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
 
-	/* TODO: Setup the clocks, etc. here, if they were not configured before
-	main() was called. */
+	// TODO: Setup the clocks, etc. here
+	
+	//Enable Clock 
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
+	//Enable pins 
+	GPIO_InitTypeDef GPIO_config;
+	//output pins
+	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light | shift_reg_move | shift_reg_update;
+	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; //output
+	GPIO_config.GPIO_OType = GPIO_OType_PP;//push pull
+	GPIO_config.GPIO_PuPd = GPIO_PuPd_UP;//pull up
+	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;//speed good enough for shift reg
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	//Enable ADC
+	// ADC1 is on APB2 - enables adc clock
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
+	// The GPIO pin (PC3) still needs AHB1
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
+	GPIO_InitTypeDef GPIO_InitStruct;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN; // Analog mode
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3; // PC3
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL; // No pull resistor otherwise would effect voltage from pot
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	ADC_Init(ADC1, &ADC_InitStruct);
+	ADC_Cmd(ADC1, ENABLE); // Power on ADC1
+	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
+
+	//turn on adc
+	ADC_Cmd(ADC1,ENABLE);
+
+	//shift_reg_delay();
 }
+
+static uint16_t poll_adc_function(void){
+	uint16_t converted_data;
+	// 1. Trigger the conversion
+	ADC_SoftwareStartConv(ADC1);
+	// 2. Wait for End-of-Conversion fla
+	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+	// 3. Read the result (0-4095)
+	converted_data = ADC_GetConversionValue(ADC1);
+	return converted_data;
+}
+
+
+//***
+static void delay_us(uint32_t time){
+	uint32_t start = TIM2->CNT;
+
+}
+
+//**
+//shift reg functions
+static void sr_falling_edge(void){
+	//make shift register clock high to wait for the next falling edge
+	GPIO_SetBits(GPIOC, shift_reg_clock);
+	//wait 2 ms enough time for clock to be high
+
+	GPIO_ResetBit(GPIOC, shift_reg_clock);
+
+	//wait 2 ms enough time for clock to be high
+
+}
+
+
+
+//traffic light changer
+static void tl_change_state(uint32_t light){
+	//reset all lights
+	GPIO_ResetBit(GPIOC, red | green | yellow);
+	//set light
+	if(light == green){
+		GPIO_SetBits(GPIOC, green);
+	}else if(light == yellow){
+		GPIO_SetBits(GPIOC, yellow);
+	}else{
+		GPIO_SetBits(GPIOC, red);
+	}
+}
+
+
+/////////Tasks///////////////////////////////////////
+static void update_traffic_rate_task(void #pvParameters){
+	//TickType_t used to measure time
+ 	TickType_t current_poll_time = xTaskGetTickCount();
+	//poll adc value from pot
+	uint16_t adc_value = poll_adc_function();
+	//give that to the generator que
+	xQueueOverwrite(generator_que, &adc_value);
+
+	next_poll_time = next_pole
+	//vTaskDelay used to delay periodic tast 
+	//pdMS_TO_TICKS converts micro sec to ticks 
+	vTaskDelay(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot ));
+
+}
+
+
+/////////Car Gen///////////////////////////////////////
+//need to generate randomly ~ to the adc value converted from pot
+static void generate_car_task(void #pvParameters){
+	uint16_t adc_value;
+	#define min_delay = 500
+	#define max delay = 3500
+	
+	xQueuePeek(generator_que, &adc_value, portMax_DELAY);
+	while(1){
+		//read first value in the que
+		xQueuePeek(generator_que, &adc_value, portMax_DELAY);
+
+	}
+
+
+
+}
+
+
+/////////Taffic ligh control task///////////////////////////////////////
+
+
+	
+
+
+
+
+
 
