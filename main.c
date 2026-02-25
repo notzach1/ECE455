@@ -25,7 +25,7 @@
     ***************************************************************************
      *                                                                       *
      *    FreeRTOS provides completely free yet professionally developed,    *
-     *    robust, strictly quality controlled, supported, and cross          *
+     *    robust, strictly quality-controlled, supported, and cross          *
      *    platform software that is more than just the market leader, it     *
      *    is the industry's de facto standard.                               *
      *                                                                       *
@@ -175,7 +175,6 @@ functionality.
 	//shift reg reset pin
 #define shift_reg_reset  GPIO_Pin_8
 //////////////////////////////////////////////////////////
-
 
 //**********************************
 //might have to change?
@@ -480,16 +479,52 @@ static uint32_t light_time(uint16_t adc_value, uint8_t light){
 
 	//Traffic light task
 static void traffic_light_control_task(void *pvParameters){
-	//default to red light
-	xQueueOverwrite(light_state,@red_light);
-	//build periodic timer  xLightTimer - anme, time, one shot, 
-		//vLightTimerCallback
+	uint8_t cur_state;
+	uint16_t adc_value;
+	uint32_t light_delay_time;
+	//get current light state
+	xQueueOverwrite(light_state, &cur_state);
+	//set up timer  
+		//xTimerCreatenanme, time, one run, 
 	traffic_light_timer = xTimerCreate("tl_timer",pdMS_TO_TICKS(2000),pdFALSE,NULL,  tl_task_handle);
 	configASSERT(traffic_light_timer);
+	
+	for(;;){
+		//get ADC value from que
+		xQueuePeek(poll_adc_que,&adc_value);
+		//get delay time 
+		if(cur_state == yellow){
+			light_delay_time = default_delay;
+		}else{
+			light_delay_time = light_time(adc_value, cur_state);
+		}
+		
+	//give timer delay
+//***
+
+	//switch states
+		
+//***
+	}
 }
 
 
 /////////Display street control///////////////////////////////////////
+static void display_street(void *pvParameters){
+	uint32 cur_street;
+	uint8_t light;
+	TickType cur_time = xTaskGetTickCount();
+	for(;;){
+	
+
+
+
+
+
+
+	}
+
+}
 
 
 
