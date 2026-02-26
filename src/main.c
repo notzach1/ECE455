@@ -398,37 +398,71 @@ static void Display_Street(void *pvParameters){
 	car_postion[19]= {0};
 	uint32_t new_car = 0; 
 	uint8_t light = red;
-	uint car_count = 0;
+	uint8_t car_count = 0;
+	uint8_t cur_car_pos =0;
 	
 	while(1){
 		//get latest light state
-		//want to count the number of cars recieved 
+		//want to count the number of cars received 
 		while(xQueueReceive(light_state_street, &light, 0)){
 			new car_count++;
 		}
 		//get most recent light state 
 		xQueueReceive(light_state_street, &light, 0);
-		//we want to clear the last led - car is leaving
+		//we want to clear the last led - the car is leaving
 		car_postion[18] =0;
 		//move car along by one led
+		//i is the index of the street 
 		for(int i = 18; i>0;i--){
+			cur_car_pos = i-1;
+			//if the spot in front of the car is clear, move the car 
+			if(car_postion[cur_car_pos] ==1 && car_postion[i] ==0){
 
-
+				//want to check the its not blocked by the light
+				//we want to stop the car between the 8th and 9th led index 7 and 8
+				if(i==8 && light != green) {
+					//block car 
+				}else{
+					//we move the car 
+					car_position[i] =1;
+					car_position[cur_car_pos] =0;
+				}
+			}
 		}
-		
-		
-		
+	//add the generated car 
+	if(car_count>0 && car_position[0] ==0){
+		//car to be generated and first led is clear
+		 car_position[0] = 1;
+	}
+	new_cars = 0; 
 
+	//output array to shift register 
+	GPIOC->ODR &= ~shift_reg_reset; // clear shift reg
+	//delay 
+	for(volatile int i = 0; i < 1000; i++){
+	} 
+	GPIOC->ODR |=  shift_reg_reset;//sets shift reg high
 
+	//send out bits 
+	for(int i =18; i>=0; i--){
+		if(car_position[i] == 1){
+			GPIOC->ODR |= shift_reg_data;//set the data pin high
+		}else{
+			GPIOC->ODR &= ~shift_reg_data;//set the data pin to low
+		}
+		//trigger clock 
+		GPIOC->ODR |=shift_reg_clock;//clock high
+		//small delay
+		for(volatile int i = 0; i < 1000; i++){
+		} 
+		GPIOC->ODR &= ~Shift_Register_Clock;//clcok low
 
 	}
+		
+	//run itself again, refresh rate 
+	vTaskDelay(pdMS_TO_TICKS(200));
+	}
 }
-
-
-
-
-
-
 
 void vApplicationMallocFailedHook( void )
 {
