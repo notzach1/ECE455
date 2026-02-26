@@ -292,41 +292,77 @@ static void Adjust_Traffic(void *pvParameters) {
 
 //notified by the adjust traffic
 static void Traffic_Light(void *pvParameters) {
+	//initialization - runs once
 	uint32_t delay = 0;
 	double received = 0;
 	uint8_t traffic_light = red;//start with red light
 	double difference = 0;
 	uint32_t green_delay = 0;
-	
-	// once notified do calculation
-	if (xQueueReceive(trafficFlowLightQueue, &received, pdMS_TO_TICKS(1000))) {}
-	TickType_t CurrentTime = xTaskGetTickCount();
-	difference = maximum_time - (minimum_time)*received; 
-	
-	// traffic light state machine
-	green_delay = (uint32_t)(((1.0+received)*difference)/3.0);
-	switch (traffic_light)
-	{
-		case red:
-			traffic_light = green;
-			delay = green_delay;
-		case green:
-			traffic_light = yellow;
-			delay = yellow_time;
-		default:
-			traffic_light = red;
-			delay = maximum_time - green_delay;
+	uint32_t red_delay = 0;
+	double temp =0;
+
+	xQueueOverwrite(light_state, &traffic_light);
+	xQueueOverwrite(light_state_street, &traffic_light);
+	xTimerChangePeriod(tl_timer, pdMS_TO_TICKS(maximum_time), 0);
+
+	while(1){
+		// once notified, do the calculation
+			//might not need the pdMs could be set to zero
+		//get the latest adc value
+		if (xQueueReceive(trafficFlowLightQueue, &received, 0)) {}
+		//do calculations for light delay
+		temp = (double)minimum_time + received*(double(maximum_time - minimum_time));
+		
+		difference = 2.0 - 1.5 * received;
+		red_delay =(uint32_t)(cycle_time / (1.0 + difference));
+        green_delay = (uint32_t)(cycle_time - (double)red_delay);
+
+		//change light state 
+		switch (traffic_light)
+		{
+			case red:
+				traffic_light = green;
+				delay = green_delay;
+				break;
+			case green:
+				traffic_light = yellow;
+				delay = yellow_time;
+				break;
+			default:
+				traffic_light = red;
+				delay = maximum_time - green_delay;
+		}
+		// send light state to queues
+		xQueueOverwrite(light_state, &traffic_light);
+		xQueueOverwrite(light_state_street, &traffic_light);
+		//delay task to call itself again 
+		xTimerChangePeriod(tl_timer, pdMS_TO_TICKS(delay_ms), 0);
 	}
-	// send light state to queue
-	xQueueSend(trafficLightQueue, &traffic_light, pdMS_TO_TICKS(1000));
-	//notifies the traffic output task
-	tl_change_state(traffic_light);
-	vTaskDelay(pdMS_TO_TICKS(delay));
 }
 
-//traffic output task 
+//traffic lightoutput task 
 	//should just run tl_change helper function based on the light state in the que
+static void TL_Display(void *pvParameters){
+	uint8_t state = red
+	while(1){
+		 xQueueReceive(light_state, &state, portMAX_DELAY);
+		tl_change_state(state);
+	}
+}
 
+//traffic light changer helper fun
+static void tl_change_state(uint8_t light){
+	//reset all lights
+	GPIO_ResetBits(GPIOC, red | green | yellow);
+	//set light
+	if(light == green){
+		GPIO_SetBits(GPIOC, green);
+	}else if(light == yellow){
+		GPIO_SetBits(GPIOC, yellow);
+	}else{
+		GPIO_SetBits(GPIOC, red);
+	}
+}
 
 
 //car_generator task 
@@ -343,19 +379,7 @@ static void Traffic_Light(void *pvParameters) {
 
 
 
-//traffic light changer helper fun
-static void tl_change_state(uint8_t light){
-	//reset all lights
-	GPIO_ResetBits(GPIOC, red | green | yellow);
-	//set light
-	if(light == green){
-		GPIO_SetBits(GPIOC, green);
-	}else if(light == yellow){
-		GPIO_SetBits(GPIOC, yellow);
-	}else{
-		GPIO_SetBits(GPIOC, red);
-	}
-}
+
 
 void vApplicationMallocFailedHook( void )
 {
