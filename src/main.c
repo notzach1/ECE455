@@ -231,7 +231,7 @@ main(void)
     xTaskCreate(Traffic_Light,"Traffic_Light",configMINIMAL_STACK_SIZE + 200, NULL, 1, &traffic_light_handle);
     xTaskCreate(TL_Display,"TL_Display",configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
     xTaskCreate(Car_Gen,"Car_Gen",configMINIMAL_STACK_SIZE + 200, NULL, 1, &gen_handle);
-    xTaskCreate(Display_Traffic,"Display_Traffic", configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
+    xTaskCreate(Display_Street,"Display_Street", configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
 
 	//one-shot timer for traffic light
 	tl_timer = xTimerCreate("Traffic_Timer",pdMS_TO_TICKS(maximum_time),pdFALSE,NULL,tl_timer_callback);
@@ -340,7 +340,7 @@ static void Traffic_Light(void *pvParameters) {
 	}
 }
 
-//traffic lightoutput task 
+//traffic light output task 
 	//should just run tl_change helper function based on the light state in the que
 static void TL_Display(void *pvParameters){
 	uint8_t state = red
@@ -370,10 +370,59 @@ static void tl_change_state(uint8_t light){
 	//generates an array to drive the shift register
 	//updates the generate car que
 	//notifies the street display task 
-
-
+static void Car_Gen(void *pvParameters){
+	double recieved =0;
+	uint8_t car =0;
+	int percent =0;
+	int rand = 0;//convert adc to a int that denotes the prob of car spawning ie 0.5 -> 50%
+	
+	while(1){
+		xQueueReceive(trafficFlowCarsQueue, &received, 0);
+		percent = (int)(received * 100.0);//get chance of spawn based on norm adc
+		rand = rand() %100; gives us value from 0 to 99
+		if(rand<percent){
+			car =1; //gen car
+			//only sends a message when the car is generated 
+			xQueueSend(Car_Gen, &car, 0);
+		}else{
+			car = 0;//dont gen car
+			
+		}
+		///run itself again every 500 ms 
+		vTaskDelay(pdMS_TO_TICKS(500));
+	}
+}
 
 //street display task
+static void Display_Street(void *pvParameters){
+	car_postion[19]= {0};
+	uint32_t new_car = 0; 
+	uint8_t light = red;
+	uint car_count = 0;
+	
+	while(1){
+		//get latest light state
+		//want to count the number of cars recieved 
+		while(xQueueReceive(light_state_street, &light, 0)){
+			new car_count++;
+		}
+		//get most recent light state 
+		xQueueReceive(light_state_street, &light, 0);
+		//we want to clear the last led - car is leaving
+		car_postion[18] =0;
+		//move car along by one led
+		for(int i = 18; i>0;i--){
+
+
+		}
+		
+		
+		
+
+
+
+	}
+}
 
 
 
@@ -487,6 +536,7 @@ static uint16_t poll_adc_function(void){
 	converted_data = ADC_GetConversionValue(ADC1);
 	return converted_data;
 }
+
 
 
 
