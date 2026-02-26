@@ -133,17 +133,6 @@ The malloc failed and stack overflow hook (or callback) functions:
 These two hook functions are provided as examples, but do not contain any
 functionality.
 */
-//////////////////////////////////////////////////////////
-
-
-
-//////////////////////////////////////////////////////////
-//DESCRIPTION of queues and tasks
-	/*
-
-
-
-	*/
 
 /* Standard includes. */
 #include <stdint.h>
@@ -172,28 +161,21 @@ functionality.
 #define default_light_time 2000
 
 //////////////////////////////////////////////////////////
-//pin names
-	//pin names for adc
-#define adc_pin GPIO_Pin_3//lab manual pin 3
-	//pin names for tl
-#define red_light GPIO_Pin_0 //lab manual pin 0
-#define yellow_light GPIO_Pin_1 //lab manual pin 1
-#define green_light GPIO_Pin_2 //lab manual pin 2
-	//shift register pins
+#define adc_pin GPIO_Pin_3
+#define red_light GPIO_Pin_0 
+#define yellow_light GPIO_Pin_1 
+#define green_light GPIO_Pin_2 
 #define shift_reg_data GPIO_Pin_6
-	//shift reg clock pin
 #define shift_reg_clock GPIO_Pin_7
-	//shift reg reset pin
 #define shift_reg_reset  GPIO_Pin_8
 //////////////////////////////////////////////////////////
 
-
 //**********************************
-//might have to change?
-#define mainQUEUE_LENGTH 100
-
 //default yellow time (const)
-#define yellow_time = 2500
+#define mainQUEUE_LENGTH 100
+#define yellow_time 1000
+#define minimum_time 4000 
+#define maximum_time 8000
 
 //////////////////////////////////////////////////////////
 //ques
@@ -208,7 +190,6 @@ static xQueueHandle trafficLightQueue;
 //Timer handle lets us stop start, change the wait of the timer
 // static TimerHandle_t traffic_light_timer;
 
-
 //task handles lets us wake up a specific task, stop and start the task if higher priority comes in
 // static TaskHandle_t tl_task_handle;
 
@@ -222,7 +203,7 @@ static void prvSetupHardware( void );//sets up clocks and gpio pins
 	//adc poll helper fucntion
 static uint16_t poll_adc_function(void);//polls the adc reading from pot to get new rate of gen
 
-	//changes the output of the tl leds
+//changes the output of the tl leds
 static void tl_change_state(uint8_t light);
 
 //////////////////////////////////////////////////////////
@@ -246,42 +227,38 @@ static uint32_t light_time(uint16_t adc_value, uint8_t light);
 
 int main(void)
 {
-	//run set up hardwar function
 	prvSetupHardware();
 
-	//build tasks xQueueCreat(length, size)
-    generator_que         = xQueueCreate(1, sizeof(uint8_t));
+	// build tasks
     light_state           = xQueueCreate(1, sizeof(uint8_t));
-    poll_adc_que          = xQueueCreate(1, sizeof(uint16_t));
     trafficFlowLightQueue = xQueueCreate(1, sizeof(double));
     trafficFlowCarsQueue  = xQueueCreate(1, sizeof(double));
     trafficLightQueue     = xQueueCreate(1, sizeof(uint8_t));
 	
-	xTimerCreate( "ADC_Timer",
-	                   100,
-	                   pdFALSE,
-	                   0,
-	                   ADC_callBack);
-	//build tasks xTaskCreate(function, name for debuging, size
-	// this maps the handle 
+    // create tasks
+	xTimerCreate(
+		"ADC_Timer",
+		100,
+		pdFALSE,
+		0,
+		ADC_callBack);
 	xTaskCreate(
 		Adjust_Traffic,
 		"AdjustTraffic",
 		configMINIMAL_STACK_SIZE + 120,
 		NULL, 2, &adjust_traffic_handle
 	);
-	
 	xTaskCreate(
 		Traffic_Light,
-		"traffic_light",
+		"Traffic_Light",
 		configMINIMAL_STACK_SIZE + 120,
-		NULL, 2, &traffic_light_handle;
+		NULL, 2, &traffic_light_handle
 	);
 	
 	// xTaskCreate(update_traffic_rate_task, "rate", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
 
 	// Register for kernel-aware debugging
-	vQueueAddToRegistry(trafficFlowQueue, "trafficFlowQueue");
+	// vQueueAddToRegistry(trafficFlowQueue, "trafficFlowQueue");
 
 	//turn on scheduler
 	vTaskStartScheduler();
@@ -295,8 +272,7 @@ static void ADC_callBack(TimerHandle_t xTimer) {
 
 static void Adjust_Traffic(void *pvParameters) {
 	uint16_t ADC_Result = poll_adc_function();
-	double ADC_Norm = ADC_Result/4095;
-
+	double ADC_Norm = (double)ADC_Result / 4095.0;
 	// check if notified then send, check 
 	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 	xQueueOverwrite(trafficFlowCarsQueue, &ADC_Norm);
@@ -306,26 +282,36 @@ static void Adjust_Traffic(void *pvParameters) {
 }
 
 //notified by the adjust traffic
-static void Traffic_light(void *pvParameters){
+static void Traffic_Light(void *pvParameters) {
+	uint32_t delay = 0;
 	uint8_t received = 0;
 	uint8_t traffic_light = red;
-
+	double difference; 
+	uint32_t green_delay = 0;
+	
 	// once notified do calculation
 	if (xQueueReceive(trafficFlowLightQueue, &received, pdMS_TO_TICKS(1000))) {}
-
+	TickType_t CurrentTime = xTaskGetTickCount();
+	difference = maximum_time - (minimum_time)*received; 
+	
 	// traffic light state machine
+	green_delay = (uint32_t)(((1.0+received)*difference)/3.0);
 	switch (traffic_light)
 	{
 		case red:
 			traffic_light = green;
+			delay = green_delay;
 		case green:
 			traffic_light = yellow;
+			delay = yellow_time;
 		default:
 			traffic_light = red;
+			delay = maximum_time - green_delay;
 	}
-
 	// send light state to queue
 	xQueueSend(trafficLightQueue, &traffic_light, pdMS_TO_TICKS(1000));
+	tl_change_state(traffic_light);
+	vTaskDelay(pdMS_TO_TICKS(delay));
 }
 
 void vApplicationMallocFailedHook( void )
@@ -491,23 +477,23 @@ static uint32_t light_time(uint16_t adc_value, uint8_t light){
 //**
 //have another task wake this one would take aout the vtask delay
 
-static void update_traffic_rate_task(void *pvParameters){
-
-	for(;;){
-		//TickType_t used to measure time
-		TickType_t current_poll_time = xTaskGetTickCount();
-		//poll ADC value from pot
-		uint16_t adc_value = poll_adc_function();
-		adc_value = adc_value/4095;
-		//give that to the queue for other tasks to use
-		xQueueOverwrite(poll_adc_que, &adc_value);
-
-		//vTaskDelay used to delay a periodic task
-			//pdMS_TO_TICKS converts microseconds to ticks
-		printf("%d", (int)(&adc_value)*1000);
-		vTaskDelayUntil(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
-	}
-}
+//static void update_traffic_rate_task(void *pvParameters){
+//
+//	for(;;){
+//		//TickType_t used to measure time
+//		TickType_t current_poll_time = xTaskGetTickCount();
+//		//poll ADC value from pot
+//		uint16_t adc_value = poll_adc_function();
+//		adc_value = adc_value/4095;
+//		//give that to the queue for other tasks to use
+//		// xQueueOverwrite(poll_adc_que, &adc_value);
+//
+//		//vTaskDelay used to delay a periodic task
+//			//pdMS_TO_TICKS converts microseconds to ticks
+//		printf("%d", (int)(&adc_value)*1000);
+//		vTaskDelayUntil(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
+//	}
+//}
 
 /////////Car Gen///////////////////////////////////////
 //need to generate randomly ~ to the ADC value converted from the pot
