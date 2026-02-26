@@ -169,6 +169,7 @@ functionality.
 #define shift_reg_data GPIO_Pin_6
 #define shift_reg_clock GPIO_Pin_7
 #define shift_reg_reset  GPIO_Pin_8
+#define mainQUEUE_LENGTH 5
 //////////////////////////////////////////////////////////
 
 //**********************************
@@ -179,108 +180,114 @@ functionality.
 #define maximum_time 8000
 
 //////////////////////////////////////////////////////////
-//ques
+//queues
+static xQueueHandle gen_car_que; // uint8_t 1 gen car 0 no car
+	//light state handles hold current light state
+static xQueueHandle light_state_street;//uint8_t holds state of the light
 static xQueueHandle light_state;
+	//flow ques hold the normalized ADC rate 
 static xQueueHandle trafficFlowLightQueue; 
 static xQueueHandle trafficFlowCarsQueue;
-static xQueueHandle trafficLightQueue;
-//////////////////////////////////////////////////////////
 
-//Handles for sl timer
-//street light timers - when timer goes off rtos will run this handle and this will wake the traffic light control to switch states
-//Timer handle lets us stop start, change the wait of the timer
-// static TimerHandle_t traffic_light_timer;
+//task handles
+static TaskHandle_t adjust_traffic_handle;
+static TaskHandle_t traffic_light_handle;
+static TaskHandle_t gen_handle;
 
-//task handles lets us wake up a specific task, stop and start the task if higher priority comes in
-// static TaskHandle_t tl_task_handle;
+//timers
+static TimerHandle_t tl_timer;
+static TimerHandle_t adc_timer;
+
+//tasks 
+//static void Traffic_Light(void *pvParameters);
+//static void ADC_callBack(TimerHandle_t xTimer);
+//static void Adjust_Traffic(void *pvParameters);
+
 
 //////////////////////////////////////////////////////////
 //hardware functions
-	/*
-	 * TODO: Implement this function for any hardware specific clock configuration
-	 * that was not already performed before main() was called.
-	 */
 static void prvSetupHardware( void );//sets up clocks and gpio pins
-	//adc poll helper fucntion
+	//adc poll helper function
 static uint16_t poll_adc_function(void);//polls the adc reading from pot to get new rate of gen
-
-//changes the output of the tl leds
+//changes the output of the TL LEDs
 static void tl_change_state(uint8_t light);
-
-//////////////////////////////////////////////////////////
-//tasks
-static void update_traffic_rate_task(void *pvParameters); //polls pot and updates the rate of gen
-static void traffic_light_control_task(void *pvParameters);//changes light states
-static void generate_car_task(void *pvParameters);//produces car generation
-
-static void Traffic_Light(void *pvParameters);
-static void ADC_callBack(TimerHandle_t xTimer);
-static void Adjust_Traffic(void *pvParameters);
-
-/////////////////////////////////////////////////////////////////////
-
-static TaskHandle_t adjust_traffic_handles
-static TaskHandle_t traffic_light_handle;
-
-static uint32_t light_time(uint16_t adc_value, uint8_t light);
 
 /*-----------------------------------------------------------*/
 main(void)
-{
+{	
+	//initialize hardware
 	prvSetupHardware();
+	//build ques 
+	xQueueHandle gen_car_que = xQueueCreate(1, sizeof(uint8_t));
+		//2 ques for light state
+	xQueueHandle light_state = xQueueCreate(1, sizeof(uint8_t));
+	xQueueHandle light_state_street = xQueueCreate(1 sizeof(uint8_t));
+		//2 ques for traffic flow 
+	xQueueHandle trafficFlowLightQueue = xQueueCreate(1, sizeof(double));
+	xQueueHandle trafficFlowCarsQueue = xQueueCreate(1, sizeof(double));
 
-	//light_state holds the current light state of the tl
-    light_state           = xQueueCreate(1, sizeof(uint8_t));
-	//this holds the normalized adc value 
-		//set by the light control function
-    trafficFlowLightQueue = xQueueCreate(1, sizeof(double));
-    trafficFlowCarsQueue  = xQueueCreate(1, sizeof(double));
-    trafficLightQueue     = xQueueCreate(1, sizeof(uint8_t));
-	
-    // create tasks
-	xTimerCreate(
-		"ADC_Timer",
-		100,
-		pdFALSE,
-		0,
-		ADC_callBack);
-	xTaskCreate(
-		Adjust_Traffic,
-		"AdjustTraffic",
-		configMINIMAL_STACK_SIZE + 120,
-		NULL, 2, &adjust_traffic_handle
-	);
-	xTaskCreate(
-		Traffic_Light,
-		"Traffic_Light",
-		configMINIMAL_STACK_SIZE + 120,
-		NULL, 2, &traffic_light_handle
-	);
-	
-	// xTaskCreate(update_traffic_rate_task, "rate", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
+	//build tasks 
+	xTaskCreate(Adjust_Traffic,"Adjust_Traffic",configMINIMAL_STACK_SIZE + 200, NULL, 1, &adjust_traffic_handle);
+    xTaskCreate(Traffic_Light,"Traffic_Light",configMINIMAL_STACK_SIZE + 200, NULL, 1, &traffic_light_handle);
+    xTaskCreate(TL_Display,"TL_Display",configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
+    xTaskCreate(Car_Gen,"Car_Gen",configMINIMAL_STACK_SIZE + 200, NULL, 1, &gen_handle);
+    xTaskCreate(Display_Traffic,"Display_Traffic", configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
 
-	// Register for kernel-aware debugging
-	// vQueueAddToRegistry(trafficFlowQueue, "trafficFlowQueue");
+	//one-shot timer for traffic light
+	tl_timer = xTimerCreate("Traffic_Timer",pdMS_TO_TICKS(maximum_time),pdFALSE,NULL,tl_timer_callback);
+	//periodic timer for ADC
+	adc_timer = xTimerCreate(
+        "Adc_timer",
+        pdMS_TO_TICKS(500),
+        pdTRUE,
+        NULL,
+        ADC_callBack
+    );
+	//start ADC conversion
+	xTimerStart(adc_timer,0);//no delay
 
-	//turn on scheduler
 	vTaskStartScheduler();
 
+	while(1){
+	}
 	return 0;
 }
 
+//complete
+//ADC_callBack - wakes the traffic adjust task when the adc timer goes off
+//periodic timer every 500ms
 static void ADC_callBack(TimerHandle_t xTimer) {
 	vTaskNotifyGive(adjust_traffic_handle);
 }
 
-static void Adjust_Traffic(void *pvParameters) {
-	uint16_t ADC_Result = poll_adc_function();
-	double ADC_Norm = (double)ADC_Result / 4095.0;
-	// check if notified then send, check 
-	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	xQueueOverwrite(trafficFlowCarsQueue, &ADC_Norm);
-	xQueueOverwrite(trafficFlowLightQueue, &ADC_Norm);
-	// after send, notify traffic light and create traffic tasks
+//complete
+//tl_timer_callback calls itself back
+//one shot timer 
+static void tl_timer_callback(TimerHandle_t xTimer) {
 	vTaskNotifyGive(traffic_light_handle);
+}
+
+static void Adjust_Traffic(void *pvParameters) {
+	uint16_t ADC_Result = 0;
+	double ADC_Norm = 0;
+	// check if notified then send, check 
+	while(1){
+		//wait for notification
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		//get ADC value
+		ADC_Result = poll_adc_function();
+		//normalize adc value
+		ADC_Norm = (double)ADC_Result / 4095.0;
+		//give to ques 
+		xQueueOverwrite(trafficFlowCarsQueue, &ADC_Norm);
+		xQueueOverwrite(trafficFlowLightQueue, &ADC_Norm);
+		// after send, notify traffic light and create traffic tasks
+			//notify traffic_light task
+			//dont think we need the traffic light task will deal with timer 
+		//vTaskNotifyGive(traffic_light_handle);
+			//notify 
+		vTaskNotifyGive(gen_handle);
+	}
 }
 
 //notified by the adjust traffic
@@ -312,28 +319,28 @@ static void Traffic_Light(void *pvParameters) {
 	}
 	// send light state to queue
 	xQueueSend(trafficLightQueue, &traffic_light, pdMS_TO_TICKS(1000));
+	//notifies the traffic output task
 	tl_change_state(traffic_light);
 	vTaskDelay(pdMS_TO_TICKS(delay));
 }
 
+//traffic output task 
+	//should just run tl_change helper function based on the light state in the que
 
 
-//light_time - get time for light
 
-static uint32_t light_time(uint16_t adc_value, uint8_t light){
-//2 cases are light green, 1 if it is red, 0
-//yellow light is constant
-	uint32_t time = 0;
-	if(light){
-		//light is green
-		time = default_light_time +  default_light_time*(adc_value / 4095);
-	}
-	else{
-		//light is red
-		time = 2*default_light_time +  default_light_time*(adc_value / 4095);
-	}
-	return (uint32_t)time;
-}
+//car_generator task 
+	//notified by the flow adjust task that a new adc value is ready 
+	//generates an array to drive the shift register
+	//updates the generate car que
+	//notifies the street display task 
+
+
+
+//street display task
+
+
+
 
 
 //traffic light changer helper fun
@@ -349,10 +356,6 @@ static void tl_change_state(uint8_t light){
 		GPIO_SetBits(GPIOC, red);
 	}
 }
-
-
-
-
 
 void vApplicationMallocFailedHook( void )
 {
