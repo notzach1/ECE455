@@ -293,9 +293,9 @@ static void Adjust_Traffic(void *pvParameters) {
 //notified by the adjust traffic
 static void Traffic_Light(void *pvParameters) {
 	uint32_t delay = 0;
-	uint8_t received = 0;
-	uint8_t traffic_light = red;
-	double difference; 
+	double received = 0;
+	uint8_t traffic_light = red;//start with red light
+	double difference = 0;
 	uint32_t green_delay = 0;
 	
 	// once notified do calculation
