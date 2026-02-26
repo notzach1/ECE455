@@ -25,7 +25,7 @@
     ***************************************************************************
      *                                                                       *
      *    FreeRTOS provides completely free yet professionally developed,    *
-     *    robust, strictly quality controlled, supported, and cross          *
+     *    robust, strictly quality-controlled, supported, and cross          *
      *    platform software that is more than just the market leader, it     *
      *    is the industry's de facto standard.                               *
      *                                                                       *
@@ -133,11 +133,23 @@ The malloc failed and stack overflow hook (or callback) functions:
 These two hook functions are provided as examples, but do not contain any
 functionality.
 */
+//////////////////////////////////////////////////////////
+
+
+
+//////////////////////////////////////////////////////////
+//DESCRIPTION of queues and tasks
+	/*
+
+
+
+	*/
 
 /* Standard includes. */
 #include <stdint.h>
 #include <stdio.h>
 #include "stm32f4_discovery.h"
+#include <stdlib.h>
 /* Kernel includes. */
 #include "stm32f4xx.h"
 #include "../FreeRTOS_Source/include/FreeRTOS.h"
@@ -146,221 +158,162 @@ functionality.
 #include "../FreeRTOS_Source/include/task.h"
 #include "../FreeRTOS_Source/include/timers.h"
 
-
-
 /*-----------------------------------------------------------*/
+//traffic light states
+
+#define yellow 1
+#define green 2
+#define red 0
+
+#define car_speed 500 //2 leds per second
+
+//sample rate of pot - lab manual
+#define sample_rate_pot 500
+#define default_light_time 2000
+
+//////////////////////////////////////////////////////////
+//pin names
+	//pin names for adc
+#define adc_pin GPIO_Pin_3//lab manual pin 3
+	//pin names for tl
+#define red_light GPIO_Pin_0 //lab manual pin 0
+#define yellow_light GPIO_Pin_1 //lab manual pin 1
+#define green_light GPIO_Pin_2 //lab manual pin 2
+	//shift register pins
+#define shift_reg_data GPIO_Pin_6
+	//shift reg clock pin
+#define shift_reg_clock GPIO_Pin_7
+	//shift reg reset pin
+#define shift_reg_reset  GPIO_Pin_8
+//////////////////////////////////////////////////////////
+
+
+//**********************************
+//might have to change?
 #define mainQUEUE_LENGTH 100
 
-#define amber  	0
-#define green  	1
-#define red  	2
-#define blue  	3
+//default yellow time (const)
+#define yellow_time = 2500
 
-#define amber_led	LED3
-#define green_led	LED4
-#define red_led		LED5
-#define blue_led	LED6
+//////////////////////////////////////////////////////////
+//ques
+static xQueueHandle poll_adc_que; //que for polling adc values from pot
+static xQueueHandle generator_que; //generate cars based on pot
+static xQueueHandle light_state;//current light state
+static xQueueHandle trafficFlowLightQueue; 
+static xQueueHandle trafficFlowCarsQueue;
+static xQueueHandle trafficLightQueue;
+//////////////////////////////////////////////////////////
+
+//Handles for sl timer
+//street light timers - when timer goes off rtos will run this handle and this will wake the traffic light control to switch states
+//Timer handle lets us stop start, change the wait of the timer
+static TimerHandle_t traffic_light_timer;
+
+//task handles lets us wake up a specific task, stop and start the task if higher priority comes in
+static TaskHandle_t tl_task_handle;
 
 
-/*
- * TODO: Implement this function for any hardware specific clock configuration
- * that was not already performed before main() was called.
- */
-static void prvSetupHardware( void );
 
-/*
- * The queue send and receive tasks as described in the comments at the top of
- * this file.
- */
-static void Manager_Task( void *pvParameters );
-static void Blue_LED_Controller_Task( void *pvParameters );
-static void Green_LED_Controller_Task( void *pvParameters );
-static void Red_LED_Controller_Task( void *pvParameters );
-static void Amber_LED_Controller_Task( void *pvParameters );
 
-xQueueHandle xQueue_handle = 0;
+//////////////////////////////////////////////////////////
+//hardware functions
+	/*
+	 * TODO: Implement this function for any hardware specific clock configuration
+	 * that was not already performed before main() was called.
+	 */
+static void prvSetupHardware( void );//sets up clocks and gpio pins
+	//adc poll helper fucntion
+static uint16_t poll_adc_function(void);//polls the adc reading from pot to get new rate of gen
 
+	//changes the output of the tl leds
+static void tl_change_state(uint8_t light);
+
+//////////////////////////////////////////////////////////
+//tasks
+static void update_traffic_rate_task(void *pvParameters); //polls pot and updates the rate of gen
+static void traffic_light_control_task(void *pvParameters);//changes light states
+static void generate_car_task(void *pvParameters);//produces car generation
+static void traffic_light_led_task(void *pvParameters);
+static void ADC_callBack(TimerHandle_t xTimer);
+static void Adjust_Traffic(void *pvParameters);
+
+/////////////////////////////////////////////////////////////////////
+
+static TaskHandle_t adjust_traffic_handle;
+
+static uint32_t light_time(uint16_t adc_value, uint8_t light);
 
 /*-----------------------------------------------------------*/
 
 int main(void)
 {
-
-	/* Initialize LEDs */
-	STM_EVAL_LEDInit(amber_led);
-	STM_EVAL_LEDInit(green_led);
-	STM_EVAL_LEDInit(red_led);
-	STM_EVAL_LEDInit(blue_led);
-
-	/* Configure the system ready to run the demo.  The clock configuration
-	can be done here if it was not done before main() was called. */
+	//run set up hardwar function
 	prvSetupHardware();
 
-	/* Create the queue used by the queue send and queue receive tasks.
-	http://www.freertos.org/a00116.html */
-	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( uint16_t ) );	/* The size of each item the queue holds. */
+	//build tasks xQueueCreat(length, size)
+	generator_que = xQueueCreate(1, sizeof(uint8_t)); //generate cars based on pot
+	light_state = xQueueCreate(1, sizeof(uint8_t));//current light state
+	xTimerCreate( "ADC_Timer",
+	                   100,
+	                   pdFALSE,
+	                   0,
+	                   ADC_callBack);
 
-	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "MainQueue" );
+	//build tasks xTaskCreate(function, name for debuging, size
 
-	xTaskCreate( Manager_Task, "Manager", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-	xTaskCreate( Blue_LED_Controller_Task, "Blue_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Red_LED_Controller_Task, "Red_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Green_LED_Controller_Task, "Green_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Amber_LED_Controller_Task, "Amber_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate(update_traffic_rate_task, "rate", configMINIMAL_STACK_SIZE +128,NULL,2,NULL);
 
-	/* Start the tasks and timer running. */
+	// Register for kernel-aware debugging
+	vQueueAddToRegistry(trafficFlowQueue, "trafficFlowQueue");
+
+	//turn on scheduler
 	vTaskStartScheduler();
 
 	return 0;
 }
 
 
-/*-----------------------------------------------------------*/
-
-static void Manager_Task( void *pvParameters )
-{
-	uint16_t tx_data = amber;
-
-	while(1)
-	{
-
-		if(tx_data == amber)
-			STM_EVAL_LEDOn(amber_led);
-		if(tx_data == green)
-			STM_EVAL_LEDOn(green_led);
-		if(tx_data == red)
-			STM_EVAL_LEDOn(red_led);
-		if(tx_data == blue)
-			STM_EVAL_LEDOn(blue_led);
-
-		if( xQueueSend(xQueue_handle,&tx_data,1000))
-		{
-			printf("Manager: %u ON!\n", tx_data);
-			if(++tx_data == 4)
-				tx_data = 0;
-			vTaskDelay(1000);
-		}
-		else
-		{
-			printf("Manager Failed!\n");
-		}
-	}
+static void ADC_callBack(TimerHandle_t xTimer) {
+	vTaskNotifyGiveFromISR(adjust_traffic_handle, NULL);
 }
 
-/*-----------------------------------------------------------*/
+static void Adjust_Traffic(void *pvParameters) {
+	uint16_t ADC_Result = poll_adc_function();
+	double ADC_Norm = ADC_Result/4095;
 
-static void Blue_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == blue)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(blue_led);
-				printf("Blue Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-				{
-					printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
-					vTaskDelay(500);
-				}
-			}
-		}
-	}
+	// check if notified then send
+	xQueueSend(trafficFlowCarsQueue, &ADC_Norm, pdMS_TO_TICKS(1000));
+	xQueueSend(trafficFlowLightQueue, &ADC_Norm, pdMS_TO_TICKS(1000));
+	// after send, notify traffic light and create traffic tasks
+
+
 }
 
 
-/*-----------------------------------------------------------*/
+//notified by the adjust traffic
+static void Traffic_light(void *pvParameters){
+	uint8_t received = 0;
+	uint8_t traffic_light = red;
 
-static void Green_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
+	// once notified do calculation
+	if (xQueueReceive(trafficFlowLightQueue,&received,pdMS_TO_TICKS(1000))) {}
+
+	// traffic light state machine
+	switch (traffic_light)
 	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == green)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(green_led);
-				printf("Green Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("GreenTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
+		case red:
+			traffic_light = green;
+		case green:
+			traffic_light = yellow;
+		default:
+			traffic_light = red;
 	}
+
+	// send light state to queue
+	xQueueSend(trafficLightQueue, &light_state, pdMS_TO_TICKS(1000));
+
 }
-
-/*-----------------------------------------------------------*/
-
-static void Red_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == red)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(red_led);
-				printf("Red off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("RedTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-
-/*-----------------------------------------------------------*/
-
-static void Amber_LED_Controller_Task( void *pvParameters )
-{
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == amber)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(amber_led);
-				printf("Amber Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("AmberTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
-	}
-}
-
-
-/*-----------------------------------------------------------*/
 
 void vApplicationMallocFailedHook( void )
 {
@@ -369,7 +322,7 @@ void vApplicationMallocFailedHook( void )
 
 	Called if a call to pvPortMalloc() fails because there is insufficient
 	free memory available in the FreeRTOS heap.  pvPortMalloc() is called
-	internally by FreeRTOS API functions that create tasks, queues, software 
+	internally by FreeRTOS API functions that create tasks, queues, software
 	timers, and semaphores.  The size of the FreeRTOS heap is set by the
 	configTOTAL_HEAP_SIZE configuration constant in FreeRTOSConfig.h. */
 	for( ;; );
@@ -418,7 +371,257 @@ static void prvSetupHardware( void )
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
 
-	/* TODO: Setup the clocks, etc. here, if they were not configured before
-	main() was called. */
+	// TODO: Setup the clocks, etc. here
+
+	//Enable Clock
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
+	//Enable pins
+	GPIO_InitTypeDef GPIO_config;
+	//output pins
+
+
+	//** might make shift reg pull down active low
+
+	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light ;
+	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; //output
+	GPIO_config.GPIO_OType = GPIO_OType_PP;//push pull
+
+
+	//** make pulldown
+	GPIO_config.GPIO_PuPd = GPIO_PuPd_DOWN;//pull up
+	//**
+
+	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;//speed good enough for shift reg
+	GPIO_Init(GPIOC, &GPIO_config);
+
+	//configure shift register output
+	GPIO_InitTypeDef GPIO_config2;
+	GPIO_config2.GPIO_Pin = shift_reg_clock | shift_reg_reset |shift_reg_data;
+	GPIO_config2.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_Init(GPIOC, &GPIO_config2);
+
+
+	GPIO_InitTypeDef GPIO_InitStruct;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN; // Analog mode
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3; // PC3
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL; // No pull resistor otherwise would affect the voltage from pot
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+
+	ADC_Cmd(ADC1, ENABLE); // Power on ADC1
+	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
+
 }
 
+
+//technically not polling, I am not changing the name
+static uint16_t poll_adc_function(void){
+	uint16_t converted_data;
+	// 1. Trigger the conversion
+	ADC_SoftwareStartConv(ADC1);
+	// 2. Wait for the End-of-Conversion flag
+	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+	// 3. Read the result (0-4095)
+	converted_data = ADC_GetConversionValue(ADC1);
+	return converted_data;
+}
+
+
+static void traffic_to_shift_reg(uint8_t *car_pos)
+{
+    for (int i = 18; i >= 0; i--)
+    {
+        /* set data pin */
+        if (car_pos[i] == 0)
+        {
+            GPIO_SetBits(GPIOC,GPIO_Pin_6); /* data high = no car? adjust polarity as needed */
+        }
+        else
+        {
+            GPIO_ResetBits(GPIOC,GPIO_Pin_6); /* data low = car present */
+        }
+        /* falling edge on clock to shift in data */
+        GPIOC->ODR |= GPIO_Pin_7; /* clock high */
+        GPIOC->ODR &= ~GPIO_Pin_7; /* clock low  */
+    }
+}
+
+
+
+//traffic light changer helper fun
+static void tl_change_state(uint8_t light){
+	//reset all lights
+	GPIO_ResetBits(GPIOC, red | green | yellow);
+	//set light
+	if(light == green){
+		GPIO_SetBits(GPIOC, green);
+	}else if(light == yellow){
+		GPIO_SetBits(GPIOC, yellow);
+	}else{
+		GPIO_SetBits(GPIOC, red);
+	}
+}
+
+//light_time - get time for light
+
+static uint32_t light_time(uint16_t adc_value, uint8_t light){
+//2 cases are light green, 1 if it is red, 0
+//yellow light is constant
+	uint32_t time = 0;
+	if(light){
+		//light is green
+		time = default_light_time +  default_light_time*(adc_value / 4095);
+	}
+	else{
+		//light is red
+		time = 2*default_light_time +  default_light_time*(adc_value / 4095);
+	}
+	return (uint32_t)time;
+}
+
+
+
+/////////Tasks///////////////////////////////////////
+//task read ADC value
+
+//**
+//have another task wake this one would take aout the vtask delay
+
+static void update_traffic_rate_task(void *pvParameters){
+
+	for(;;){
+		//TickType_t used to measure time
+		TickType_t current_poll_time = xTaskGetTickCount();
+		//poll ADC value from pot
+		uint16_t adc_value = poll_adc_function();
+		adc_value = adc_value/4095;
+		//give that to the queue for other tasks to use
+		xQueueOverwrite(poll_adc_que, &adc_value);
+
+		//vTaskDelay used to delay a periodic task
+			//pdMS_TO_TICKS converts microseconds to ticks
+		printf("%d", (int)(&adc_value)*1000);
+		vTaskDelayUntil(&current_poll_time, pdMS_TO_TICKS(sample_rate_pot));
+	}
+}
+
+/////////Car Gen///////////////////////////////////////
+//need to generate randomly ~ to the ADC value converted from the pot
+//static void generate_car_task(void *pvParameters){
+//	uint16_t adc_value;
+////	#define min_delay = 500
+////	#define max_delay = 3500//max is technically 4000 if the rand is completely added
+////	#define rand_max = 501
+//
+//
+//	for(;;){
+//		//get the first item in the queue for ADC value
+//		xQueuePeek(poll_adc_que, &adc_value, portMAX_DELAY);
+//		//normalize ADC value
+//			//need float for normalization
+//		float normalize_adc = (float)adc_value / (float)4095;
+//		//Makes sure we always get the minimum delay if the normalized ADC was close to zero which would be way to fast of a rate
+//		//originally had no max_delay*adc norm, and that did not work
+//		float none_delay = max_delay - normalize_adc*(max delay - min_delay);
+//		//delay time is none_delay + rand
+//		//note technically the max is 4000
+//		uint32_t delay_time_gen = (uint32_t)none_delay+ (uint32_t)(rand() % rand_max);
+//		//give this delay to the periodic task
+//		vTaskDelay(pdMS_TO_TICKS(delay_time_gen));
+//		//send to generator que to gen car
+//		uint8_t gen_car_flag = 1;
+//		xQueueSend(generator_que, &gen_car_flag, 0);
+//	}
+//}
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/////////Taffic ligh control task///////////////////////////////////////
+	//Traffic light timer handle/callback - wakes up the traffic light task when the timer goes off
+//static TimerHandle_t traffic_light_timer(TimerHandle_t tim){
+//	//When the timer goes off, we are going to trigger a traffic control event
+//	//We want this code to be short because it has low priority, and the light has high priority
+//	//signals an event. The event is changing the traffic light state
+//	vTaskNotifyGive(tl_task_handle);
+//
+//	//***
+//	//task it self dont need a handle
+//}
+//
+//
+//
+//	//Traffic light task
+//static void traffic_light_control_task(void *pvParameters){
+//	uint8_t cur_state;
+//	uint16_t adc_value;
+//	uint32_t light_delay_time;
+//	//get current light state
+//	xQueueOverwrite(light_state, &cur_state);
+//	//set up timer
+//		//xTimerCreatenanme, time, one run,
+//	traffic_light_timer = xTimerCreate("tl_timer",pdMS_TO_TICKS(2000),pdFALSE,NULL,  tl_task_handle);
+//	configASSERT(traffic_light_timer);
+//
+//	for(;;){
+//		//get ADC value from que
+//		xQueuePeek(poll_adc_que,&adc_value);
+//		//get delay time
+//		if(cur_state == yellow){
+//			light_delay_time = default_delay;
+//		}else{
+//			light_delay_time = light_time(adc_value, cur_state);
+//		}
+//		//stop timer
+//		xTimerStop(traffic_light_timer, 0);
+//		//set timer period
+//		xTimerChangePeriod(traffic_light_timer, pdMS_TO_TICKS(light_delay_time);
+//		//start timer
+//		xTimerStart(traffic_light_timer, 0);
+//
+////***
+//	//change the light variable
+//	if(cur_state==red){
+//		cur_state = green;
+//	}else if(cur_state == green){
+//		cur_state = yellow;
+//	}else{
+//		cur_state = red;
+//	}
+//
+//	//give light state to the queue
+//	xQueueOverwrite(qLight,&cur_state);
+//	}
+//}
+//
+//
+//
+//
+//
