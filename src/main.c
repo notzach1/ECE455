@@ -210,28 +210,8 @@ static uint16_t poll_adc_function(void);//polls the adc reading from pot to get 
 //changes the output of the TL LEDs
 static void tl_change_state(uint8_t light);
 
-extern void run_adc_test(void);
-//test adc
-static uint16_t test_poll_adc(void) {
-    ADC_SoftwareStartConv(ADC1);
-    while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
-    return ADC_GetConversionValue(ADC1);
-}
-
-void run_adc_test(void) {
-    printf("\n=== ADC Test ===\n");
-    for (int i = 0; i < 10; i++) {
-        uint16_t val = test_poll_adc();
-        printf("Sample %d: raw=%u  norm=%.4f\n", i, val, (double)val / 4095.0);
-        for (volatile int d = 0; d < 500000; d++); // ~200ms delay
-    }
-    printf("=== Done ===\n\n");
-}
-
-
 static void shift_reg_clear(void) {
     GPIO_ResetBits(GPIOC, shift_reg_reset);
-    for (volatile int i = 0; i < 1000; i++);
     GPIO_SetBits(GPIOC, shift_reg_reset);
 }
 static void shift_reg_push_bit(uint8_t bit) {
@@ -252,17 +232,13 @@ static void shift_reg_push_bit(uint8_t bit) {
 }
 
 static void test_shift_register(void) {
-    uint8_t i;
-
-
-
     while (1) {
         // Clear all outputs
         shift_reg_clear();
 
 
         // Push a 1, then 7 zeros — walks the bit through each output
-        for (i = 0; i < 19; i++) {
+        for (int i = 0; i < 19; i++) {
             if (i == 0) {
                 shift_reg_push_bit(1);
             } else {
@@ -289,18 +265,18 @@ int main(void)
 			//yellow working
 
 	//test shift register output
-	//test_shift_register();
-	//while(1);
+//	test_shift_register();
+//	while(1);
 
 	//test adc conversion
-	while(1){
-		double val = ADC_GetConversionValue(ADC1);
-	    printf("%d",(int)(val*1000));
+//	while(1) {
+////		ADC_SoftwareStartConv(ADC1);
+////        while(!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+//        uint16_t val = poll_adc_function();
+//        printf("-> %d\n", val);
+//        for(volatile int d = 0; d < 500000; d++);
+//	}
 
-	}
-
-
-	run_adc_test();
 
 
 
@@ -312,11 +288,11 @@ int main(void)
 	trafficFlowCarsQueue = xQueueCreate(1, sizeof(double));
 
 	// Build Tasks 
-	xTaskCreate(Adjust_Traffic,"Adjust_Traffic",configMINIMAL_STACK_SIZE + 200, NULL, 1, &adjust_traffic_handle);
-    xTaskCreate(Traffic_Light,"Traffic_Light",configMINIMAL_STACK_SIZE + 200, NULL, 1, &traffic_light_handle);
-    xTaskCreate(TL_Display,"TL_Display",configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
-    xTaskCreate(Car_Gen,"Car_Gen",configMINIMAL_STACK_SIZE + 200, NULL, 1, &gen_handle);
-    xTaskCreate(Display_Street,"Display_Street", configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
+	xTaskCreate(Adjust_Traffic,"Adjust_Traffic",configMINIMAL_STACK_SIZE, NULL, 1, &adjust_traffic_handle);
+    xTaskCreate(Traffic_Light,"Traffic_Light",configMINIMAL_STACK_SIZE, NULL, 2, &traffic_light_handle);
+    xTaskCreate(TL_Display,"TL_Display",configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+    xTaskCreate(Car_Gen,"Car_Gen",configMINIMAL_STACK_SIZE, NULL, 3, &gen_handle);
+    xTaskCreate(Display_Street,"Display_Street", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
 
 	//one-shot timer for traffic light
 	tl_timer = xTimerCreate("Traffic_Timer",pdMS_TO_TICKS(maximum_time),pdFALSE,NULL,tl_timer_callback);
@@ -329,7 +305,7 @@ int main(void)
         ADC_callBack
     );
 	//start ADC conversion
-	xTimerStart(adc_timer,0);// no delay
+
 	vTaskStartScheduler();
 	return 0;
 }
@@ -354,18 +330,19 @@ static void Adjust_Traffic(void *pvParameters) {
 	// check if notified then send, check 
 	while(1){
 		//wait for notification
-		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
 		//get ADC value
 		ADC_Result = poll_adc_function();
 		//normalize adc value
 		ADC_Norm = (double)ADC_Result / 4095.0;
+		printf("ADC Raw: %u, Normalized: %.4f\n", ADC_Result, ADC_Norm);
 		//give to ques 
 		xQueueOverwrite(trafficFlowCarsQueue, &ADC_Norm);
 		xQueueOverwrite(trafficFlowLightQueue, &ADC_Norm);
 		// after send, notify traffic light and create traffic tasks
 			//notify traffic_light task
 			//dont think we need the traffic light task will deal with timer 
-		//vTaskNotifyGive(traffic_light_handle);
+		xTaskNotifyGive(traffic_light_handle);
 			//notify 
 		xTaskNotifyGive(gen_handle);
 	}
@@ -391,7 +368,7 @@ static void Traffic_Light(void *pvParameters) {
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 		//get the latest adc value
-		if (xQueueReceive(trafficFlowLightQueue, &received, 0)) {}
+		if (xQueueReceive(trafficFlowLightQueue, &received, 0));
 		// Calculations for light delay
 		double cycle_time = (double)minimum_time + received * (double)(maximum_time - minimum_time);
 
@@ -462,20 +439,23 @@ static void Car_Gen(void *pvParameters){
 	
 	while(1){
 
-		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		xQueueReceive(trafficFlowCarsQueue, &recieved, 0);
-		percent = (int)(recieved * 100.0);
-		rand_val = rand() % 100;
-		
-		if (rand_val < percent) {
-			car =1; // gen car
-			// only sends a message when the car is generated
-			xQueueSend(gen_car_que, &car, 0);
-		} else {
-			car = 0;// dont gen car
+
+		if (xQueuePeek(trafficFlowCarsQueue, &recieved, 0) == pdTRUE) {
+			percent = (int)(recieved * 100.0);
+			rand_val = rand() % 100;
+
+			if (rand_val < percent) {
+				car =1; // gen car
+				// only sends a message when the car is generated
+				printf("car generated");
+				xQueueSend(gen_car_que, &car, 0);
+			} else {
+				car = 0; // dont gen car
+
+			}
 		}
 		///run itself again every 500 ms 
-		//vTaskDelay(pdMS_TO_TICKS(500));
+		vTaskDelay(pdMS_TO_TICKS(500));
 	}
 }
 
@@ -558,6 +538,7 @@ void vApplicationMallocFailedHook( void )
 	internally by FreeRTOS API functions that create tasks, queues, software
 	timers, and semaphores.  The size of the FreeRTOS heap is set by the
 	configTOTAL_HEAP_SIZE configuration constant in FreeRTOSConfig.h. */
+	printf("Entered malloc failed hook");
 	for( ;; );
 }
 /*-----------------------------------------------------------*/
@@ -613,10 +594,10 @@ static void prvSetupHardware( void )
 	GPIO_InitTypeDef GPIO_config;
 	//output pins
 	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light ;
-	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; //output
-	GPIO_config.GPIO_OType = GPIO_OType_PP;//push pull
-	GPIO_config.GPIO_PuPd = GPIO_PuPd_DOWN;//pull up
-	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;//speed good enough for shift reg
+	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; 			// Output
+	GPIO_config.GPIO_OType = GPIO_OType_PP;			// Push Pull
+	GPIO_config.GPIO_PuPd = GPIO_PuPd_DOWN;			// Pull Down
+	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;		// Speed good enough for shift reg
 	GPIO_Init(GPIOC, &GPIO_config);
 
 	//configure shift register output
@@ -624,7 +605,7 @@ static void prvSetupHardware( void )
 	GPIO_config2.GPIO_Pin = shift_reg_clock | shift_reg_reset | shift_reg_data;
 	GPIO_config2.GPIO_Mode = GPIO_Mode_OUT;
 	GPIO_config2.GPIO_OType = GPIO_OType_PP;
-	GPIO_config2.GPIO_PuPd = GPIO_PuPd_DOWN;
+	GPIO_config2.GPIO_PuPd = GPIO_PuPd_NOPULL;
 	GPIO_config2.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(GPIOC, &GPIO_config2);
 
@@ -647,32 +628,33 @@ static uint16_t poll_adc_function(void){
 
 //**********
 static void ADC_setup(void){
+	// ADC1 is on APB2
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
-
+	// The GPIO pin (PC3) still needs AHB1
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
 	GPIO_InitTypeDef GPIO_InitStruct;
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;      // Analog mode
+	GPIO_InitStruct.GPIO_Pin  = GPIO_Pin_3;         // PC3
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;   // No pull resistor
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+
+
 	ADC_InitTypeDef ADC_InitStruct;
-
-
+//	ADC_StructInit(&ADC_InitStruct);
 	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
 	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
-	ADC_InitStruct.ADC_ScanConvMode =DISABLE;
-	ADC_InitStruct.ADC_ExternalTrigConv =DISABLE;
-	ADC_InitStruct.ADC_ExternalTrigConvEdge = DISABLE;
-
-	/* Apply initialization */
+	ADC_InitStruct.ADC_NbrOfConversion = 1;
+	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
+    ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1;
+    ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
 	ADC_Init(ADC1, &ADC_InitStruct);
-
-	//enable
-	ADC_Cmd(ADC1, ENABLE);
-
-	//
+	
+	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
 	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
+	//	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_480Cycles);
+	ADC_Cmd(ADC1, ENABLE);  // Power on ADC1
+	//  ADC_SoftwareStartConv(ADC1);
+
 }
-
-
