@@ -373,8 +373,8 @@ static void Traffic_Light(void *pvParameters) {
 		double cycle_time = (double)minimum_time + received * (double)(maximum_time - minimum_time);
 
 		difference = 2.0 - 1.5 * received;
-		red_delay = (uint32_t)(cycle_time / (1.0 + difference));
-		green_delay = (uint32_t)(cycle_time - (double)red_delay);
+		green_delay = (uint32_t)(cycle_time / (1.0 + difference));
+		red_delay = (uint32_t)(cycle_time - (double)red_delay);
 
 		//change light state 
 		switch (traffic_light)
@@ -442,13 +442,14 @@ static void Car_Gen(void *pvParameters){
 		if (xQueuePeek(trafficFlowCarsQueue, &recieved, 0) == pdTRUE) {
 			percent = (int)(recieved * 100.0);
 			if(recieved<0.5){
-				rand_val = rand() % 40;
+				rand_val = rand() % 50;
 				if (percent < min_percent) percent = min_percent;
 			}else{
-				rand_val = rand() % 125;
+				rand_val = rand() % 130;
+
 			}
 
-			rand_val = rand() % 125;
+
 
 			if (rand_val < percent) {
 				car =1; // gen car

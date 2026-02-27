@@ -10,10 +10,10 @@ main.c:352:13:Traffic_Light	80	static
 main.c:404:13:TL_Display	24	static
 main.c:414:13:tl_change_state	16	static
 main.c:433:13:Car_Gen	56	static
-main.c:469:13:Display_Street	56	static
-main.c:537:6:vApplicationMallocFailedHook	8	static
-main.c:552:6:vApplicationStackOverflowHook	16	static
-main.c:566:6:vApplicationIdleHook	16	static
-main.c:588:13:prvSetupHardware	24	static
-main.c:623:17:poll_adc_function	16	static
-main.c:636:13:ADC_setup	40	static
+main.c:470:13:Display_Street	56	static
+main.c:538:6:vApplicationMallocFailedHook	8	static
+main.c:553:6:vApplicationStackOverflowHook	16	static
+main.c:567:6:vApplicationIdleHook	16	static
+main.c:589:13:prvSetupHardware	24	static
+main.c:624:17:poll_adc_function	16	static
+main.c:637:13:ADC_setup	40	static
