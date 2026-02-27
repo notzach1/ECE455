@@ -165,8 +165,8 @@ functionality.
 // default yellow time (const)
 // #define mainQUEUE_LENGTH 100
 #define yellow_time 1000
-#define minimum_time 4000 
-#define maximum_time 8000
+#define minimum_time 3000
+#define maximum_time 7000
 #define default_light_time 2000
 // #define sample_rate_pot 500
 
@@ -342,7 +342,7 @@ static void Adjust_Traffic(void *pvParameters) {
 		// after send, notify traffic light and create traffic tasks
 			//notify traffic_light task
 			//dont think we need the traffic light task will deal with timer 
-		xTaskNotifyGive(traffic_light_handle);
+		//xTaskNotifyGive(traffic_light_handle);
 			//notify 
 		xTaskNotifyGive(gen_handle);
 	}
@@ -435,14 +435,20 @@ static void Car_Gen(void *pvParameters){
 	uint8_t car = 0;
 	int percent = 0;
 	int rand_val = 0;
+	const int min_percent = 30;
 	//convert adc to a int that denotes the prob of car spawning ie 0.5 -> 50%
 	
 	while(1){
-
-
 		if (xQueuePeek(trafficFlowCarsQueue, &recieved, 0) == pdTRUE) {
 			percent = (int)(recieved * 100.0);
-			rand_val = rand() % 100;
+			if(recieved<0.5){
+				rand_val = rand() % 40;
+				if (percent < min_percent) percent = min_percent;
+			}else{
+				rand_val = rand() % 125;
+			}
+
+			rand_val = rand() % 125;
 
 			if (rand_val < percent) {
 				car =1; // gen car
