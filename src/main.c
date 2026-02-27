@@ -165,8 +165,8 @@ functionality.
 // default yellow time (const)
 // #define mainQUEUE_LENGTH 100
 #define yellow_time 1000
-#define minimum_time 4000 
-#define maximum_time 8000
+#define minimum_time 3500
+#define maximum_time 7000
 #define default_light_time 2000
 // #define sample_rate_pot 500
 
@@ -342,7 +342,7 @@ static void Adjust_Traffic(void *pvParameters) {
 		// after send, notify traffic light and create traffic tasks
 			//notify traffic_light task
 			//dont think we need the traffic light task will deal with timer 
-		xTaskNotifyGive(traffic_light_handle);
+		//xTaskNotifyGive(traffic_light_handle);
 			//notify 
 		xTaskNotifyGive(gen_handle);
 	}
@@ -353,8 +353,7 @@ static void Traffic_Light(void *pvParameters) {
 	//initialization - runs once
 	uint32_t delay = 0;
 	double received = 0;
-	uint8_t traffic_light = red;//start with red light
-	double difference = 0;
+	uint8_t traffic_light = red; //start with red light
 	uint32_t green_delay = 0;
 	uint32_t red_delay = 0;
 
@@ -369,12 +368,11 @@ static void Traffic_Light(void *pvParameters) {
 
 		//get the latest adc value
 		if (xQueueReceive(trafficFlowLightQueue, &received, 0));
+		
 		// Calculations for light delay
-		double cycle_time = (double)minimum_time + received * (double)(maximum_time - minimum_time);
+		green_delay = (uint32_t)((minimum_time / 3.0) + received * ((2.0 * maximum_time / 3.0) - (minimum_time / 3.0)));
+		red_delay   = (uint32_t)((2.0 * minimum_time / 3.0) + received * ((maximum_time / 3.0) - (2.0 * minimum_time / 3.0)));
 
-		difference = 2.0 - 1.5 * received;
-		red_delay = (uint32_t)(cycle_time / (1.0 + difference));
-		green_delay = (uint32_t)(cycle_time - (double)red_delay);
 
 		//change light state 
 		switch (traffic_light)
@@ -389,7 +387,7 @@ static void Traffic_Light(void *pvParameters) {
 				break;
 			default:
 				traffic_light = red;
-				delay = maximum_time - green_delay;
+				delay = red_delay;
 		}
 		// send light state to queues
 		xQueueOverwrite(light_state, &traffic_light);
@@ -435,14 +433,21 @@ static void Car_Gen(void *pvParameters){
 	uint8_t car = 0;
 	int percent = 0;
 	int rand_val = 0;
+	const int min_percent = 30;
 	//convert adc to a int that denotes the prob of car spawning ie 0.5 -> 50%
 	
 	while(1){
-
-
 		if (xQueuePeek(trafficFlowCarsQueue, &recieved, 0) == pdTRUE) {
 			percent = (int)(recieved * 100.0);
-			rand_val = rand() % 100;
+			if(recieved<0.5){
+				rand_val = rand() % 75;
+				if (percent < min_percent) percent = min_percent;
+			}else{
+				rand_val = rand() % 120;
+
+			}
+
+
 
 			if (rand_val < percent) {
 				car =1; // gen car
