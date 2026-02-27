@@ -147,20 +147,11 @@ functionality.
 #include "../FreeRTOS_Source/include/task.h"
 #include "../FreeRTOS_Source/include/timers.h"
 
-/*-----------------------------------------------------------*/
-//traffic light states
-
+// Traffic Light States
 #define yellow 1
 #define green 2
 #define red 0
-
-#define car_speed 500 //2 leds per second
-
-//sample rate of pot - lab manual
-// #define sample_rate_pot 500
-#define default_light_time 2000
-
-//////////////////////////////////////////////////////////
+#define car_speed 500 
 
 #define adc_pin GPIO_Pin_3
 #define red_light GPIO_Pin_0 
@@ -170,63 +161,157 @@ functionality.
 #define shift_reg_clock GPIO_Pin_7
 #define shift_reg_reset  GPIO_Pin_8
 #define mainQUEUE_LENGTH 5
-//////////////////////////////////////////////////////////
 
-//**********************************
-//default yellow time (const)
-#define mainQUEUE_LENGTH 100
+// default yellow time (const)
+// #define mainQUEUE_LENGTH 100
 #define yellow_time 1000
 #define minimum_time 4000 
 #define maximum_time 8000
+#define default_light_time 2000
+// #define sample_rate_pot 500
 
 //////////////////////////////////////////////////////////
 //queues
 static xQueueHandle gen_car_que; // uint8_t 1 gen car 0 no car
-	//light state handles hold current light state
+//light state handles hold current light state
 static xQueueHandle light_state_street;//uint8_t holds state of the light
 static xQueueHandle light_state;
-	//flow ques hold the normalized ADC rate 
+//flow ques hold the normalized ADC rate 
 static xQueueHandle trafficFlowLightQueue; 
 static xQueueHandle trafficFlowCarsQueue;
 
-//task handles
+// Task Handlers
 static TaskHandle_t adjust_traffic_handle;
 static TaskHandle_t traffic_light_handle;
 static TaskHandle_t gen_handle;
 
-//timers
+// Timers
 static TimerHandle_t tl_timer;
 static TimerHandle_t adc_timer;
 
-//tasks 
-//static void Traffic_Light(void *pvParameters);
-//static void ADC_callBack(TimerHandle_t xTimer);
-//static void Adjust_Traffic(void *pvParameters);
-
+// Functions Declarations 
+// static void Traffic_Light(void *pvParameters);
+// static void ADC_callBack(TimerHandle_t xTimer);
+// static void Adjust_Traffic(void *pvParameters);
+static void Adjust_Traffic(void *pvParameters);
+static void Traffic_Light(void *pvParameters);
+static void TL_Display(void *pvParameters);
+static void Car_Gen(void *pvParameters);
+static void Display_Street(void *pvParameters);
+static void ADC_callBack(TimerHandle_t xTimer);
+static void tl_timer_callback(TimerHandle_t xTimer);
 
 //////////////////////////////////////////////////////////
 //hardware functions
 static void prvSetupHardware( void );//sets up clocks and gpio pins
+static void ADC_setup(void);
 	//adc poll helper function
 static uint16_t poll_adc_function(void);//polls the adc reading from pot to get new rate of gen
 //changes the output of the TL LEDs
 static void tl_change_state(uint8_t light);
 
-/*-----------------------------------------------------------*/
-main(void)
-{	
-	//initialize hardware
-	prvSetupHardware();
-	//build ques 
-	xQueueHandle gen_car_que = xQueueCreate(1, sizeof(uint8_t));
-		//2 ques for light state
-	xQueueHandle light_state = xQueueCreate(1, sizeof(uint8_t));
-	xQueueHandle light_state_street = xQueueCreate(1 sizeof(uint8_t));
-		//2 ques for traffic flow 
-	xQueueHandle trafficFlowLightQueue = xQueueCreate(1, sizeof(double));
-	xQueueHandle trafficFlowCarsQueue = xQueueCreate(1, sizeof(double));
+extern void run_adc_test(void);
+//test adc
+static uint16_t test_poll_adc(void) {
+    ADC_SoftwareStartConv(ADC1);
+    while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+    return ADC_GetConversionValue(ADC1);
+}
 
-	//build tasks 
+void run_adc_test(void) {
+    printf("\n=== ADC Test ===\n");
+    for (int i = 0; i < 10; i++) {
+        uint16_t val = test_poll_adc();
+        printf("Sample %d: raw=%u  norm=%.4f\n", i, val, (double)val / 4095.0);
+        for (volatile int d = 0; d < 500000; d++); // ~200ms delay
+    }
+    printf("=== Done ===\n\n");
+}
+
+
+static void shift_reg_clear(void) {
+    GPIO_ResetBits(GPIOC, shift_reg_reset);
+    for (volatile int i = 0; i < 1000; i++);
+    GPIO_SetBits(GPIOC, shift_reg_reset);
+}
+static void shift_reg_push_bit(uint8_t bit) {
+    // Set data BEFORE clock edge
+    if (bit) {
+        GPIO_SetBits(GPIOC, shift_reg_data);
+    } else {
+        GPIO_ResetBits(GPIOC, shift_reg_data);
+    }
+
+    // Small delay to let data settle
+    for (volatile int i = 0; i < 1000; i++);
+
+    // Rising edge shifts the data in
+    GPIO_SetBits(GPIOC, shift_reg_clock);
+    for (volatile int i = 0; i < 1000; i++);
+    GPIO_ResetBits(GPIOC, shift_reg_clock);
+}
+
+static void test_shift_register(void) {
+    uint8_t i;
+
+
+
+    while (1) {
+        // Clear all outputs
+        shift_reg_clear();
+
+
+        // Push a 1, then 7 zeros — walks the bit through each output
+        for (i = 0; i < 19; i++) {
+            if (i == 0) {
+                shift_reg_push_bit(1);
+            } else {
+                shift_reg_push_bit(0);
+            }
+
+        }
+
+    }
+}
+
+/*-----------------------------------------------------------*/
+int main(void)
+{	
+	// Initialize Hardware
+	prvSetupHardware();
+
+	//test led initialization
+	//GPIO_SetBits(GPIOC, yellow_light);
+	//while(1);
+		//notes
+			//green working
+			//red working
+			//yellow working
+
+	//test shift register output
+	//test_shift_register();
+	//while(1);
+
+	//test adc conversion
+	while(1){
+		double val = ADC_GetConversionValue(ADC1);
+	    printf("%d",(int)(val*1000));
+
+	}
+
+
+	run_adc_test();
+
+
+
+	// Build Queues 
+	gen_car_que = xQueueCreate(1, sizeof(uint8_t));
+	light_state = xQueueCreate(1, sizeof(uint8_t));					// 2 Queues for Light State
+	light_state_street = xQueueCreate(1, sizeof(uint8_t));	
+	trafficFlowLightQueue = xQueueCreate(1, sizeof(double));			// 2 Queues for Traffic Flow 
+	trafficFlowCarsQueue = xQueueCreate(1, sizeof(double));
+
+	// Build Tasks 
 	xTaskCreate(Adjust_Traffic,"Adjust_Traffic",configMINIMAL_STACK_SIZE + 200, NULL, 1, &adjust_traffic_handle);
     xTaskCreate(Traffic_Light,"Traffic_Light",configMINIMAL_STACK_SIZE + 200, NULL, 1, &traffic_light_handle);
     xTaskCreate(TL_Display,"TL_Display",configMINIMAL_STACK_SIZE + 200, NULL, 1, NULL);
@@ -244,12 +329,8 @@ main(void)
         ADC_callBack
     );
 	//start ADC conversion
-	xTimerStart(adc_timer,0);//no delay
-
+	xTimerStart(adc_timer,0);// no delay
 	vTaskStartScheduler();
-
-	while(1){
-	}
 	return 0;
 }
 
@@ -257,14 +338,14 @@ main(void)
 //ADC_callBack - wakes the traffic adjust task when the adc timer goes off
 //periodic timer every 500ms
 static void ADC_callBack(TimerHandle_t xTimer) {
-	vTaskNotifyGive(adjust_traffic_handle);
+	xTaskNotifyGive(adjust_traffic_handle);
 }
 
 //complete
 //tl_timer_callback calls itself back
 //one shot timer 
 static void tl_timer_callback(TimerHandle_t xTimer) {
-	vTaskNotifyGive(traffic_light_handle);
+	xTaskNotifyGive(traffic_light_handle);
 }
 
 static void Adjust_Traffic(void *pvParameters) {
@@ -286,7 +367,7 @@ static void Adjust_Traffic(void *pvParameters) {
 			//dont think we need the traffic light task will deal with timer 
 		//vTaskNotifyGive(traffic_light_handle);
 			//notify 
-		vTaskNotifyGive(gen_handle);
+		xTaskNotifyGive(gen_handle);
 	}
 }
 
@@ -299,7 +380,6 @@ static void Traffic_Light(void *pvParameters) {
 	double difference = 0;
 	uint32_t green_delay = 0;
 	uint32_t red_delay = 0;
-	double temp =0;
 
 	xQueueOverwrite(light_state, &traffic_light);
 	xQueueOverwrite(light_state_street, &traffic_light);
@@ -308,14 +388,16 @@ static void Traffic_Light(void *pvParameters) {
 	while(1){
 		// once notified, do the calculation
 			//might not need the pdMs could be set to zero
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
 		//get the latest adc value
 		if (xQueueReceive(trafficFlowLightQueue, &received, 0)) {}
-		//do calculations for light delay
-		temp = (double)minimum_time + received*(double(maximum_time - minimum_time));
-		
+		// Calculations for light delay
+		double cycle_time = (double)minimum_time + received * (double)(maximum_time - minimum_time);
+
 		difference = 2.0 - 1.5 * received;
-		red_delay =(uint32_t)(cycle_time / (1.0 + difference));
-        green_delay = (uint32_t)(cycle_time - (double)red_delay);
+		red_delay = (uint32_t)(cycle_time / (1.0 + difference));
+		green_delay = (uint32_t)(cycle_time - (double)red_delay);
 
 		//change light state 
 		switch (traffic_light)
@@ -336,31 +418,32 @@ static void Traffic_Light(void *pvParameters) {
 		xQueueOverwrite(light_state, &traffic_light);
 		xQueueOverwrite(light_state_street, &traffic_light);
 		//delay task to call itself again 
-		xTimerChangePeriod(tl_timer, pdMS_TO_TICKS(delay_ms), 0);
+		xTimerChangePeriod(tl_timer, pdMS_TO_TICKS(delay), 0);
 	}
 }
 
 //traffic light output task 
 	//should just run tl_change helper function based on the light state in the que
 static void TL_Display(void *pvParameters){
-	uint8_t state = red
+	uint8_t state = red;
 	while(1){
-		 xQueueReceive(light_state, &state, portMAX_DELAY);
+		xQueuePeek(light_state, &state, portMAX_DELAY);
 		tl_change_state(state);
+		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
 
 //traffic light changer helper fun
 static void tl_change_state(uint8_t light){
 	//reset all lights
-	GPIO_ResetBits(GPIOC, red | green | yellow);
+	GPIO_ResetBits(GPIOC, red_light | green_light | yellow_light);
 	//set light
 	if(light == green){
-		GPIO_SetBits(GPIOC, green);
+		GPIO_SetBits(GPIOC, green_light);
 	}else if(light == yellow){
-		GPIO_SetBits(GPIOC, yellow);
+		GPIO_SetBits(GPIOC, yellow_light);
 	}else{
-		GPIO_SetBits(GPIOC, red);
+		GPIO_SetBits(GPIOC, red_light);
 	}
 }
 
@@ -371,53 +454,55 @@ static void tl_change_state(uint8_t light){
 	//updates the generate car que
 	//notifies the street display task 
 static void Car_Gen(void *pvParameters){
-	double recieved =0;
-	uint8_t car =0;
-	int percent =0;
-	int rand = 0;//convert adc to a int that denotes the prob of car spawning ie 0.5 -> 50%
+	double recieved = 0;
+	uint8_t car = 0;
+	int percent = 0;
+	int rand_val = 0;
+	//convert adc to a int that denotes the prob of car spawning ie 0.5 -> 50%
 	
 	while(1){
-		xQueueReceive(trafficFlowCarsQueue, &received, 0);
-		percent = (int)(received * 100.0);//get chance of spawn based on norm adc
-		rand = rand() %100; gives us value from 0 to 99
-		if(rand<percent){
-			car =1; //gen car
-			//only sends a message when the car is generated 
-			xQueueSend(Car_Gen, &car, 0);
-		}else{
-			car = 0;//dont gen car
-			
+
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		xQueueReceive(trafficFlowCarsQueue, &recieved, 0);
+		percent = (int)(recieved * 100.0);
+		rand_val = rand() % 100;
+		
+		if (rand_val < percent) {
+			car =1; // gen car
+			// only sends a message when the car is generated
+			xQueueSend(gen_car_que, &car, 0);
+		} else {
+			car = 0;// dont gen car
 		}
 		///run itself again every 500 ms 
-		vTaskDelay(pdMS_TO_TICKS(500));
+		//vTaskDelay(pdMS_TO_TICKS(500));
 	}
 }
 
 //street display task
 static void Display_Street(void *pvParameters){
-	car_postion[19]= {0};
-	uint32_t new_car = 0; 
+	uint8_t car_position[19] = {0};
 	uint8_t light = red;
 	uint8_t car_count = 0;
 	uint8_t cur_car_pos =0;
 	
 	while(1){
 		//get latest light state
+		xQueuePeek(light_state_street, &light, 0);
+
 		//want to count the number of cars received 
-		while(xQueueReceive(light_state_street, &light, 0)){
-			new car_count++;
+		car_count =0;
+		if(xQueueReceive(gen_car_que, &car_count, 0) == pdTRUE) {
+
 		}
-		//get most recent light state 
-		xQueueReceive(light_state_street, &light, 0);
-		//we want to clear the last led - the car is leaving
-		car_postion[18] =0;
+
+		car_position[18] = 0;
 		//move car along by one led
 		//i is the index of the street 
 		for(int i = 18; i>0;i--){
 			cur_car_pos = i-1;
 			//if the spot in front of the car is clear, move the car 
-			if(car_postion[cur_car_pos] ==1 && car_postion[i] ==0){
-
+			if(car_position[cur_car_pos] ==1 && car_position[i] ==0) {
 				//want to check the its not blocked by the light
 				//we want to stop the car between the 8th and 9th led index 7 and 8
 				if(i==8 && light != green) {
@@ -434,7 +519,7 @@ static void Display_Street(void *pvParameters){
 		//car to be generated and first led is clear
 		 car_position[0] = 1;
 	}
-	new_cars = 0; 
+	car_count = 0;
 
 	//output array to shift register 
 	GPIOC->ODR &= ~shift_reg_reset; // clear shift reg
@@ -446,16 +531,15 @@ static void Display_Street(void *pvParameters){
 	//send out bits 
 	for(int i =18; i>=0; i--){
 		if(car_position[i] == 1){
-			GPIOC->ODR |= shift_reg_data;//set the data pin high
-		}else{
-			GPIOC->ODR &= ~shift_reg_data;//set the data pin to low
+			GPIOC->ODR |= shift_reg_data; //set the data pin high
+		} else{
+			GPIOC->ODR &= ~shift_reg_data; //set the data pin to low
 		}
-		//trigger clock 
+		// trigger clock 
 		GPIOC->ODR |=shift_reg_clock;//clock high
-		//small delay
-		for(volatile int i = 0; i < 1000; i++){
-		} 
-		GPIOC->ODR &= ~Shift_Register_Clock;//clcok low
+		// small delay
+		for(volatile int i = 0; i < 1000; i++) { } 
+		GPIOC->ODR &= ~shift_reg_clock; //clcok low
 
 	}
 		
@@ -522,41 +606,30 @@ static void prvSetupHardware( void )
 
 	// TODO: Setup the clocks, etc. here
 
-	//Enable Clock
+	// Enable GPIOC Clock
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
-	//Enable pins
+	    // Enable ADC1 Clock
+
 	GPIO_InitTypeDef GPIO_config;
 	//output pins
-
-	//** might make shift reg pull down active low
-
 	GPIO_config.GPIO_Pin = red_light | green_light | yellow_light ;
 	GPIO_config.GPIO_Mode = GPIO_Mode_OUT; //output
 	GPIO_config.GPIO_OType = GPIO_OType_PP;//push pull
-
-	//** make pulldown
 	GPIO_config.GPIO_PuPd = GPIO_PuPd_DOWN;//pull up
-	//**
-
 	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;//speed good enough for shift reg
 	GPIO_Init(GPIOC, &GPIO_config);
 
 	//configure shift register output
 	GPIO_InitTypeDef GPIO_config2;
-	GPIO_config2.GPIO_Pin = shift_reg_clock | shift_reg_reset |shift_reg_data;
+	GPIO_config2.GPIO_Pin = shift_reg_clock | shift_reg_reset | shift_reg_data;
 	GPIO_config2.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_config2.GPIO_OType = GPIO_OType_PP;
+	GPIO_config2.GPIO_PuPd = GPIO_PuPd_DOWN;
+	GPIO_config2.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(GPIOC, &GPIO_config2);
 
-	GPIO_InitTypeDef GPIO_InitStruct;
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN; // Analog mode
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3; // PC3
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL; // No pull resistor otherwise would affect the voltage from pot
-	GPIO_Init(GPIOC, &GPIO_InitStruct);
+	ADC_setup();
 
-
-	ADC_Cmd(ADC1, ENABLE); // Power on ADC1
-	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
 }
 
 //technically not polling, I am not changing the name
@@ -572,31 +645,34 @@ static uint16_t poll_adc_function(void){
 }
 
 
+//**********
+static void ADC_setup(void){
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
+
+	GPIO_InitTypeDef GPIO_InitStruct;
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	ADC_InitTypeDef ADC_InitStruct;
 
 
+	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
+	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
+	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
+	ADC_InitStruct.ADC_ScanConvMode =DISABLE;
+	ADC_InitStruct.ADC_ExternalTrigConv =DISABLE;
+	ADC_InitStruct.ADC_ExternalTrigConvEdge = DISABLE;
+
+	/* Apply initialization */
+	ADC_Init(ADC1, &ADC_InitStruct);
+
+	//enable
+	ADC_Cmd(ADC1, ENABLE);
+
+	//
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
+}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//
