@@ -211,44 +211,47 @@ static uint16_t poll_adc_function(void);//polls the adc reading from pot to get 
 static void tl_change_state(uint8_t light);
 
 static void shift_reg_clear(void) {
-    GPIO_ResetBits(GPIOC, shift_reg_reset);
-    GPIO_SetBits(GPIOC, shift_reg_reset);
-}
-static void shift_reg_push_bit(uint8_t bit) {
-    // Set data BEFORE clock edge
-    if (bit) {
-        GPIO_SetBits(GPIOC, shift_reg_data);
-    } else {
-        GPIO_ResetBits(GPIOC, shift_reg_data);
-    }
-
-    // Small delay to let data settle
-    for (volatile int i = 0; i < 1000; i++);
-
-    // Rising edge shifts the data in
-    GPIO_SetBits(GPIOC, shift_reg_clock);
-    for (volatile int i = 0; i < 1000; i++);
-    GPIO_ResetBits(GPIOC, shift_reg_clock);
+   
 }
 
-static void test_shift_register(void) {
-    while (1) {
-        // Clear all outputs
-        shift_reg_clear();
+//TEST shift reg
+// static void test_shift_register(void) {
+// 	uint8_t car =0;
+//     while (1) {
+//         // Clear all outputs
+//         GPIO_ResetBits(GPIOC, shift_reg_reset);
+//     	GPIO_SetBits(GPIOC, shift_reg_reset);
 
 
-        // Push a 1, then 7 zeros — walks the bit through each output
-        for (int i = 0; i < 19; i++) {
-            if (i == 0) {
-                shift_reg_push_bit(1);
-            } else {
-                shift_reg_push_bit(0);
-            }
+//         // Push a car
+//         for(int i = 0; i < 19; i++) {
+//             if(i == 0){
+// 				car =1;
+// 			    if(car){
+// 			        GPIO_SetBits(GPIOC, shift_reg_data);
+// 			    }else{
+// 			        GPIO_ResetBits(GPIOC, shift_reg_data);
+// 			    }
+// 			    // Rising edge shifts the data in
+// 			    GPIO_SetBits(GPIOC, shift_reg_clock);
+// 			    GPIO_ResetBits(GPIOC, shift_reg_clock);
+//             }else{
+// 				car =0;
+// 				if(car){
+// 			        GPIO_SetBits(GPIOC, shift_reg_data);
+// 			    }else{
+// 			        GPIO_ResetBits(GPIOC, shift_reg_data);
+// 			    }
+// 			    // Rising edge shifts the data in
+// 			    GPIO_SetBits(GPIOC, shift_reg_clock);
+// 			    GPIO_ResetBits(GPIOC, shift_reg_clock);
 
-        }
+//             }
 
-    }
-}
+//         }
+
+//     }
+// }
 
 /*-----------------------------------------------------------*/
 int main(void)
