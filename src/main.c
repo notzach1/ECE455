@@ -153,6 +153,7 @@ functionality.
 #define red 0
 #define car_speed 500 
 
+//pin definitions 
 #define adc_pin GPIO_Pin_3
 #define red_light GPIO_Pin_0 
 #define yellow_light GPIO_Pin_1 
@@ -163,7 +164,7 @@ functionality.
 #define mainQUEUE_LENGTH 5
 
 // default yellow time (const)
-// #define mainQUEUE_LENGTH 100
+
 #define yellow_time 1000
 #define minimum_time 3500
 #define maximum_time 7000
@@ -174,31 +175,35 @@ functionality.
 //queues
 static xQueueHandle gen_car_que; // uint8_t 1 gen car 0 no car
 //light state handles hold current light state
+	//use 2 ques to avoid the different branches from fighting for resources 
 static xQueueHandle light_state_street;//uint8_t holds state of the light
 static xQueueHandle light_state;
 //flow ques hold the normalized ADC rate 
+	//use 2 ques to avoid the different branches from fighting for resources 
 static xQueueHandle trafficFlowLightQueue; 
 static xQueueHandle trafficFlowCarsQueue;
 
 // Task Handlers
-static TaskHandle_t adjust_traffic_handle;
+static TaskHandle_t adjust_traffic_handle;//used to wake the adjust the traffic rate/flow task
 static TaskHandle_t traffic_light_handle;
-static TaskHandle_t gen_handle;
+static TaskHandle_t gen_handle;//used to wake the generate car task
 
 // Timers
-static TimerHandle_t tl_timer;
-static TimerHandle_t adc_timer;
+static TimerHandle_t tl_timer;//one shot timer used to trigger traffic light state change (green,yellow,red)
+static TimerHandle_t adc_timer;//periodic adc timer to get adc value 
 
 // Functions Declarations 
 // static void Traffic_Light(void *pvParameters);
 // static void ADC_callBack(TimerHandle_t xTimer);
 // static void Adjust_Traffic(void *pvParameters);
-static void Adjust_Traffic(void *pvParameters);
-static void Traffic_Light(void *pvParameters);
+static void Adjust_Traffic(void *pvParameters);//used to get adc value normalize and place in the the 2 flow ques for traffic light and car gen task
+static void Traffic_Light(void *pvParameters);//triggered by one shot timer and then adjust delay using the its own flow que
 static void TL_Display(void *pvParameters);
-static void Car_Gen(void *pvParameters);
-static void Display_Street(void *pvParameters);
-static void ADC_callBack(TimerHandle_t xTimer);
+static void Car_Gen(void *pvParameters);//called every 500ms 
+static void Display_Street(void *pvParameters);//used to send output to the 19 road leds 
+
+//timer callbacks 
+static void ADC_callBack(TimerHandle_t xTimer);//used to wake adjust traffic task when adc timer goes off
 static void tl_timer_callback(TimerHandle_t xTimer);
 
 //////////////////////////////////////////////////////////
@@ -210,45 +215,46 @@ static uint16_t poll_adc_function(void);//polls the adc reading from pot to get 
 //changes the output of the TL LEDs
 static void tl_change_state(uint8_t light);
 
-static void shift_reg_clear(void) {
-    GPIO_ResetBits(GPIOC, shift_reg_reset);
-    GPIO_SetBits(GPIOC, shift_reg_reset);
-}
-static void shift_reg_push_bit(uint8_t bit) {
-    // Set data BEFORE clock edge
-    if (bit) {
-        GPIO_SetBits(GPIOC, shift_reg_data);
-    } else {
-        GPIO_ResetBits(GPIOC, shift_reg_data);
-    }
-
-    // Small delay to let data settle
-    for (volatile int i = 0; i < 1000; i++);
-
-    // Rising edge shifts the data in
-    GPIO_SetBits(GPIOC, shift_reg_clock);
-    for (volatile int i = 0; i < 1000; i++);
-    GPIO_ResetBits(GPIOC, shift_reg_clock);
-}
-
-static void test_shift_register(void) {
-    while (1) {
-        // Clear all outputs
-        shift_reg_clear();
 
 
-        // Push a 1, then 7 zeros — walks the bit through each output
-        for (int i = 0; i < 19; i++) {
-            if (i == 0) {
-                shift_reg_push_bit(1);
-            } else {
-                shift_reg_push_bit(0);
-            }
 
-        }
+// static void test_shift_register(void) {
+//     while (1) {
+//         // Clear all outputs
+//         GPIO_ResetBits(GPIOC, shift_reg_reset);
+//     	GPIO_SetBits(GPIOC, shift_reg_reset);
+// 		uint8_t bit =0; 
 
-    }
-}
+//         // Push a 1, then 7 zeros — walks the bit through each output
+//         for(int i = 0; i < 19; i++) {
+//             if(i == 0) {
+
+// 				bit =1;
+// 			    if(bit){
+// 			        GPIO_SetBits(GPIOC, shift_reg_data);
+// 			    } else {
+// 			        GPIO_ResetBits(GPIOC, shift_reg_data);
+// 			    }
+// 			    // Rising edge shifts the data in
+// 			    GPIO_SetBits(GPIOC, shift_reg_clock);
+// 			    GPIO_ResetBits(GPIOC, shift_reg_clock);
+// 			}
+//             }else{
+// 				bit =0;
+//                     // Set data BEFORE clock edge
+// 			    if(bit){
+// 			        GPIO_SetBits(GPIOC, shift_reg_data);
+// 			    }else{
+// 			        GPIO_ResetBits(GPIOC, shift_reg_data);
+// 			    }
+// 			    // Rising edge shifts the data in
+// 			    GPIO_SetBits(GPIOC, shift_reg_clock);
+// 			    GPIO_ResetBits(GPIOC, shift_reg_clock);
+// 			}
+//             }
+//         }
+//     }
+// }
 
 /*-----------------------------------------------------------*/
 int main(void)
@@ -274,7 +280,6 @@ int main(void)
 ////        while(!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
 //        uint16_t val = poll_adc_function();
 //        printf("-> %d\n", val);
-//        for(volatile int d = 0; d < 500000; d++);
 //	}
 
 
@@ -372,7 +377,6 @@ static void Traffic_Light(void *pvParameters) {
 		// Calculations for light delay
 		green_delay = (uint32_t)((minimum_time / 3.0) + received * ((2.0 * maximum_time / 3.0) - (minimum_time / 3.0)));
 		red_delay   = (uint32_t)((2.0 * minimum_time / 3.0) + received * ((maximum_time / 3.0) - (2.0 * minimum_time / 3.0)));
-
 
 		//change light state 
 		switch (traffic_light)
@@ -590,11 +594,9 @@ static void prvSetupHardware( void )
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
 
-	// TODO: Setup the clocks, etc. here
-
 	// Enable GPIOC Clock
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
-	    // Enable ADC1 Clock
+	// Enable ADC1 Clock
 
 	GPIO_InitTypeDef GPIO_config;
 	//output pins
@@ -643,10 +645,7 @@ static void ADC_setup(void){
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;   // No pull resistor
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-
-
 	ADC_InitTypeDef ADC_InitStruct;
-//	ADC_StructInit(&ADC_InitStruct);
 	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
 	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
@@ -659,7 +658,7 @@ static void ADC_setup(void){
 	// Configure Channel 13 (PC3), rank 1, 84-cycle sample time
 	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
 	//	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_480Cycles);
-	ADC_Cmd(ADC1, ENABLE);  // Power on ADC1
-	//  ADC_SoftwareStartConv(ADC1);
+	ADC_Cmd(ADC1, ENABLE); 
+
 
 }
